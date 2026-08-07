@@ -176,6 +176,7 @@ public static class NetworkServer
         BasisPlayerModeration.UseFileOnDisc = HasFileSupport;
         IAuthIdentity.HasFileSupport = HasFileSupport;
 
+        BasisServerDIDIdentity.Initialize(HasFileSupport, Configuration.ConfigFolderName);
         Auth = new PasswordAuth(Configuration.Password ?? string.Empty);
         AuthIdentity = new BasisDIDAuthIdentity();
 

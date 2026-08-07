@@ -21,6 +21,7 @@ namespace BasisNetworkClient
         private const string PrivateKeyDID = "PrivateKeyDID";
         private const string PublicKeyDID = "PublicKeyDID";
         private const string DIDID = "DIDID";
+        public static string LastServerId { get; private set; } = string.Empty;
         public static string GetOrSaveDID()
         {
 #if UNITY_2017_1_OR_NEWER
@@ -61,6 +62,14 @@ namespace BasisNetworkClient
             BytesMessage ChallengeBytes = new BytesMessage();
 
             ChallengeBytes.Deserialize(Reader, out byte[] PayloadBytes);
+            if (Reader.AvailableBytes > 0)
+            {
+                BytesMessage ServerIdBytes = new BytesMessage();
+                if (ServerIdBytes.Deserialize(Reader, out byte[] ServerIdPayload))
+                {
+                    LastServerId = Encoding.UTF8.GetString(ServerIdPayload);
+                }
+            }
             // Client
             Payload payloadToSign = new Payload(PayloadBytes);
             if (Ed25519.Sign(Key.Item2, payloadToSign, out Signature sig) == false)
