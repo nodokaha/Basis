@@ -165,7 +165,8 @@ namespace BasisDidLink
                         NetDataWriter Writer = NetworkServer.RentWriter();
                         BytesMessage NetworkMessage = new BytesMessage();
                         NetworkMessage.Serialize(Writer, OnAuth.Challenge.Nonce.V);
-                        BNL.Log("Sending out Writer with size : " + Writer.Length);
+                        NetworkMessage.Serialize(Writer, Encoding.UTF8.GetBytes(BasisServerDIDIdentity.ServerId));
+                        BNL.Log($"Sending auth challenge and Server ID {BasisServerDIDIdentity.ServerId} with size : {Writer.Length}");
                         NetworkServer.TrySend(newPeer, Writer, BasisNetworkCommons.AuthIdentityChannel, DeliveryMethod.ReliableOrdered);
                         NetworkServer.ReturnWriter(Writer);
 

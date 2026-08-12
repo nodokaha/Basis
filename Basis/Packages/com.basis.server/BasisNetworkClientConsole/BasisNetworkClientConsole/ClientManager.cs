@@ -274,6 +274,8 @@ namespace Basis.Network
 
         public string Did { get; }
 
+        public string LastServerId { get; private set; } = string.Empty;
+
         public ConsoleClientIdentity()
         {
             BasisDIDAuthIdentityClient.ClientKeyCreation(out (PubKey, PrivKey) keys, out Did did);
@@ -290,6 +292,15 @@ namespace Basis.Network
             {
                 BNL.LogError("Malformed auth challenge from server");
                 return false;
+            }
+
+            if (reader.AvailableBytes > 0)
+            {
+                BytesMessage serverId = new BytesMessage();
+                if (serverId.Deserialize(reader, out byte[] serverIdBytes))
+                {
+                    LastServerId = Encoding.UTF8.GetString(serverIdBytes);
+                }
             }
 
             if (!Ed25519.Sign(_privateKey, new Payload(nonce), out Signature? signature) || signature == null)
