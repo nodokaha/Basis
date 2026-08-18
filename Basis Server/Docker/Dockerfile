@@ -35,7 +35,6 @@ ENV SetPort=4296 \
     UsingLoggingFile=false \
     EnableStatistics=true \
     EnableConsole=false \
-    Password=default_password \
     PeerLimit=1024
 
 # Expose UDP port for game traffic and TCP port for health checks
