@@ -9,7 +9,7 @@ WORKDIR "/src/Server/BasisServerConsole"
 
 # Restore dependencies and publish the application
 RUN dotnet restore ./BasisNetworkConsole.csproj
-RUN dotnet publish ./BasisNetworkConsole.csproj -c Release --no-restore -o /app/publish /p:TreatWarningsAsErrors=false
+RUN dotnet publish ./BasisNetworkConsole.csproj -c Release --no-restore -o /app/publish -v detailed /p:TreatWarningsAsErrors=false
 
 # Stage 2: Create runtime image
 FROM mcr.microsoft.com/dotnet/runtime:10.0-noble
