@@ -8,7 +8,7 @@ COPY ["./", "Server/"]
 WORKDIR "/src/Server/BasisServerConsole"
 
 # Restore dependencies and publish the application
-RUN dotnet restore ./BasisNetwork.sln
+RUN dotnet restore ./BasisNetworkConsole.csproj
 RUN dotnet publish ./BasisNetworkConsole.csproj -c Release --no-restore -o /app/publish
 
 # Stage 2: Create runtime image
