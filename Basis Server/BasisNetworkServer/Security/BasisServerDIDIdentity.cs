@@ -24,28 +24,37 @@ namespace BasisNetworkServer.Security
         {
             lock (Sync)
             {
-                if (hasFileSupport)
+                if (!string.IsNullOrEmpty(_serverId))
                 {
-                    string configDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configFolderName);
-                    Directory.CreateDirectory(configDir);
-                    string path = Path.Combine(configDir, FileName);
+                    return;
+                }
 
-                    if (TryLoad(path, out string loadedId))
-                    {
-                        _serverId = loadedId;
-                        BNL.Log($"Loaded Server ID {_serverId}");
-                        return;
-                    }
-
+                if (!hasFileSupport)
+                {
                     _serverId = GenerateDidKey();
-                    File.WriteAllText(path, _serverId);
-                    BNL.Log($"Generated new Server ID {_serverId}");
+                    BNL.LogWarning("Generated a temporary Server ID because file support is disabled. It will not survive a process restart.");
+                    return;
+                }
+
+                string path = GetIdentityPath(configFolderName);
+                if (TryLoad(path, out string loadedId))
+                {
+                    _serverId = loadedId;
+                    BNL.Log("Loaded persistent Server ID.");
                     return;
                 }
 
                 _serverId = GenerateDidKey();
-                BNL.LogWarning($"Generated temporary Server ID {_serverId}; file support is disabled so it cannot persist across restarts.");
+                Save(path, _serverId);
+                BNL.Log("Generated and saved persistent Server ID.");
             }
+        }
+
+        private static string GetIdentityPath(string configFolderName)
+        {
+            string configDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configFolderName);
+            Directory.CreateDirectory(configDir);
+            return Path.Combine(configDir, FileName);
         }
 
         private static bool TryLoad(string path, out string serverId)
@@ -56,8 +65,18 @@ namespace BasisNetworkServer.Security
                 return false;
             }
 
-            string loaded = File.ReadAllText(path).Trim();
-            if (!loaded.StartsWith(DidKeyResolver.PREFIX, StringComparison.Ordinal))
+            string loaded;
+            try
+            {
+                loaded = File.ReadAllText(path).Trim();
+            }
+            catch (IOException exception)
+            {
+                BNL.LogWarning($"Could not read Server ID from {path}: {exception.Message}");
+                return false;
+            }
+
+            if (!IsValidDidKey(loaded))
             {
                 BNL.LogWarning($"Ignoring invalid Server ID in {path}");
                 return false;
@@ -67,15 +86,47 @@ namespace BasisNetworkServer.Security
             return true;
         }
 
-        private static string GenerateDidKey()
+        private static void Save(string path, string serverId)
+        {
+            string temporaryPath = path + ".tmp";
+            File.WriteAllText(temporaryPath, serverId);
+
+            if (File.Exists(path))
+            {
+                File.Replace(temporaryPath, path, null);
+                return;
+            }
+
+            File.Move(temporaryPath, path);
+        }
+
+        internal static bool IsValidDidKey(string serverId)
+        {
+            if (!serverId.StartsWith(DidKeyResolver.PREFIX, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            try
+            {
+                DidKeyResolver resolver = new DidKeyResolver();
+                resolver.ResolveDocument(new Did(serverId)).GetAwaiter().GetResult();
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        internal static string GenerateDidKey()
         {
             using CryptoRng rng = CryptoRng.Create();
             byte[] privateKeyBytes = new byte[Ed25519.PrivkeySize];
             rng.GetBytes(privateKeyBytes);
             PubKey pubKey = Ed25519.ConvertPrivkeyToPubkey(new PrivKey(privateKeyBytes))
                 ?? throw new InvalidOperationException("Generated server DID private key was invalid.");
-            Did did = DidKeyResolver.EncodePubkeyAsDid(pubKey);
-            return did.V;
+            return DidKeyResolver.EncodePubkeyAsDid(pubKey).V;
         }
     }
 }
