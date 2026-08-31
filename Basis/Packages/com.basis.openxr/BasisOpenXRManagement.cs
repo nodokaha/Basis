@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Hands;
 using UnityEngine.XR.Management;
+using UnityEngine.XR.OpenXR;
 
 namespace Basis.Scripts.Device_Management.Devices.UnityInputSystem
 {
@@ -108,6 +109,7 @@ namespace Basis.Scripts.Device_Management.Devices.UnityInputSystem
         {
             IsSuspended = false;
             BasisDebug.Log("Stopping SDK for BasisOpenXRManagement");
+            BasisOpenXRRefreshRate.Unhook();
 
             foreach (var device in controls)
             {
@@ -129,11 +131,16 @@ namespace Basis.Scripts.Device_Management.Devices.UnityInputSystem
         public override void StartSDK()
         {
             BasisDebug.Log("Starting SDK for BasisOpenXRManagement");
+            PresenceSource = HMDPresenceSource.Unresolved;
             BasisLocalCameraDriver.AllowXRRenderering(true);
 
             CreatePhysicalHeadTracker("Head OPENXR", "Head OPENXR");
             LeftHand = CreatePhysicalHandTracker("Left Hand OPENXR", "Left Hand OPENXR", BasisBoneTrackedRole.LeftHand);
             RightHand = CreatePhysicalHandTracker("Right Hand OPENXR", "Right Hand OPENXR", BasisBoneTrackedRole.RightHand);
+            BasisOpenXRRefreshRate.Hook();
+            SMModuleMotionVectorsURP.ApplyMotionVectors();
+            bool spaceWarpExtensionPresent = OpenXRRuntime.IsExtensionEnabled("XR_FB_space_warp");
+            BasisDebug.Log($"SpaceWarp extension {(spaceWarpExtensionPresent ? "present" : "absent")}; motion vectors always on", BasisDebug.LogTag.Device);
             BasisDebug.Log("SDK started successfully.");
             InputSystem.onDeviceChange += onDeviceChange;
             BasisDeviceManagement.OnDeviceManagementLoop += CheckTrackersPulse;
@@ -370,9 +377,47 @@ namespace Basis.Scripts.Device_Management.Devices.UnityInputSystem
             {
                 if (_headDevices[i].TryGetFeatureValue(UnityEngine.XR.CommonUsages.userPresence, out bool present))
                 {
+                    ReportPresenceSource(HMDPresenceSource.UserPresenceFeature);
                     BasisHMDPresence.ReportPresence(present);
                     return;
                 }
+            }
+
+            if (Count == 0)
+            {
+                ReportPresenceSource(HMDPresenceSource.NoHeadDevice);
+                BasisHMDPresence.ReportPresence(false);
+                return;
+            }
+
+            ReportPresenceSource(HMDPresenceSource.NoPresenceSignal);
+        }
+
+        private enum HMDPresenceSource
+        {
+            Unresolved,
+            UserPresenceFeature,
+            NoHeadDevice,
+            NoPresenceSignal
+        }
+
+        private HMDPresenceSource PresenceSource = HMDPresenceSource.Unresolved;
+
+        private void ReportPresenceSource(HMDPresenceSource Source)
+        {
+            if (PresenceSource == Source) return;
+            PresenceSource = Source;
+            switch (Source)
+            {
+                case HMDPresenceSource.UserPresenceFeature:
+                    BasisDebug.Log("OpenXR: HMD presence read from the userPresence feature", BasisDebug.LogTag.Device);
+                    break;
+                case HMDPresenceSource.NoHeadDevice:
+                    BasisDebug.Log("OpenXR: no head device is connected — reporting the headset as not worn", BasisDebug.LogTag.Device);
+                    break;
+                case HMDPresenceSource.NoPresenceSignal:
+                    BasisDebug.Log("OpenXR: head device present but userPresence is unavailable — presence left unchanged, auto swap will not trigger", BasisDebug.LogTag.Device);
+                    break;
             }
         }
     }

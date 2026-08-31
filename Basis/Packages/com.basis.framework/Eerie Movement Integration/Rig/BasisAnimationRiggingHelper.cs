@@ -1,60 +1,47 @@
+using Basis.Scripts.Avatar;
 using Basis.Scripts.BasisSdk.Players;
 using Basis.Scripts.Common;
 using Basis.Scripts.Drivers;
 using Basis.Scripts.TransformBinders.BoneControl;
 using UnityEngine;
 using Basis.IK;
-
 public static class BasisAnimationRiggingHelper
 {
-    static Quaternion TrackerImpliedBoneRotation(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole role, Quaternion trackerRotation)
-    {
-        return Basis.Scripts.Avatar.BasisAvatarIKStageCalibration.BasisLimbRollStore.TryGet(role, out Quaternion trackerToBone)
-            ? trackerRotation * trackerToBone
-            : default;
-    }
-
-    public static Quaternion CalibratedRotationOffset(BasisLocalBoneControl control, Transform animatorRoot, Transform avatarBone)
-    {
-        return CalibratedRotationOffset(control.OutgoingWorldData.rotation, avatarBone.rotation);
-    }
-
     public static Quaternion CalibratedRotationOffset(Quaternion boneOutgoingWorldRotation, Quaternion avatarBoneRotation)
     {
         return Quaternion.Inverse(boneOutgoingWorldRotation) * avatarBoneRotation;
     }
-
     public static void CreateBasisFullBodyRIG(BasisLocalPlayer player, BasisTransformMapping Mapping, ref BasisEerieMovement job)
     {
         BasisEerieMovementSetup.SetDefaultValues(ref job);
 
         Quaternion avatarRootInv = Quaternion.Inverse(player.AvatarTransform.rotation);
-        job.offsetRotationHead = Mapping.Hashead ? avatarRootInv * Mapping.head.rotation : Quaternion.identity;
+        job.offsetRotationHead = Mapping.Hashead ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.head, BasisBoneTrackedRole.Head) : Quaternion.identity;
 
-        job.offsetRotationLeftFoot = Mapping.HasleftFoot ? CalibratedRotationOffset(BasisLocalBoneDriver.LeftFootControl, Mapping.AnimatorRoot, Mapping.leftFoot) : Quaternion.identity;
-        job.offsetRotationRightFoot = Mapping.HasrightFoot ? CalibratedRotationOffset(BasisLocalBoneDriver.RightFootControl, Mapping.AnimatorRoot, Mapping.rightFoot) : Quaternion.identity;
+        job.offsetRotationLeftFoot = Mapping.HasleftFoot ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.leftFoot, BasisBoneTrackedRole.LeftFoot) : Quaternion.identity;
+        job.offsetRotationRightFoot = Mapping.HasrightFoot ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.rightFoot, BasisBoneTrackedRole.RightFoot) : Quaternion.identity;
 
         Quaternion leftLandmarkBind = Quaternion.identity;
         Quaternion rightLandmarkBind = Quaternion.identity;
 
-        Quaternion _lastGoodLeftRot = Quaternion.identity;
-        Quaternion _lastGoodRightRot = Quaternion.identity;
-        bool _hasLastLeft = false;
-        bool _hasLastRight = false;
+        Quaternion lastGoodLeftRot = Quaternion.identity;
+        Quaternion lastGoodRightRot = Quaternion.identity;
+        bool hasLastLeft = false;
+        bool hasLastRight = false;
 
         if (Mapping.HasleftHand)
         {
             Vector3 wrist = Mapping.leftHand.position;
             var a = new[] { GetLM(Mapping.LeftIndex, 0), GetLM(Mapping.LeftIndex, 0), GetLM(Mapping.LeftMiddle, 0) };
             var b = new[] { GetLM(Mapping.LeftLittle, 0), GetLM(Mapping.LeftMiddle, 0), GetLM(Mapping.LeftLittle, 0) };
-            leftLandmarkBind = ComputeHandRotationWithFallback(wrist, a, b, ref _hasLastLeft, ref _lastGoodLeftRot);
+            leftLandmarkBind = ComputeHandRotationWithFallback(wrist, a, b, ref hasLastLeft, ref lastGoodLeftRot);
         }
         if (Mapping.HasrightHand)
         {
             Vector3 wrist = Mapping.rightHand.position;
             var a = new[] { GetLM(Mapping.RightIndex, 0), GetLM(Mapping.RightIndex, 0), GetLM(Mapping.RightMiddle, 0) };
             var b = new[] { GetLM(Mapping.RightLittle, 0), GetLM(Mapping.RightMiddle, 0), GetLM(Mapping.RightLittle, 0) };
-            rightLandmarkBind = ComputeHandRotationWithFallback(wrist, a, b, ref _hasLastRight, ref _lastGoodRightRot);
+            rightLandmarkBind = ComputeHandRotationWithFallback(wrist, a, b, ref hasLastRight, ref lastGoodRightRot);
         }
 
         Quaternion leftBoneBind = Mapping.leftHand.rotation;
@@ -63,63 +50,14 @@ public static class BasisAnimationRiggingHelper
         job.offsetRotationLeftHand = Quaternion.Inverse(leftLandmarkBind) * leftBoneBind;
         job.offsetRotationRightHand = Quaternion.Inverse(rightLandmarkBind) * rightBoneBind;
 
-        job.offsetRotationChest = Mapping.Haschest ? avatarRootInv * Mapping.chest.rotation : Quaternion.identity;
-        job.offsetRotationLeftToe = Mapping.HasleftToes ? CalibratedRotationOffset(BasisLocalBoneDriver.LeftToeControl, Mapping.AnimatorRoot, Mapping.leftToe) : Quaternion.identity;
-        job.offsetRotationRightToe = Mapping.HasrightToes ? CalibratedRotationOffset(BasisLocalBoneDriver.RightToeControl, Mapping.AnimatorRoot, Mapping.rightToe) : Quaternion.identity;
+        job.offsetRotationChest = Mapping.Haschest ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.chest, BasisBoneTrackedRole.Chest) : Quaternion.identity;
+        job.offsetRotationLeftToe = Mapping.HasleftToes ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.leftToe, BasisBoneTrackedRole.LeftToes) : Quaternion.identity;
+        job.offsetRotationRightToe = Mapping.HasrightToes ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.rightToe, BasisBoneTrackedRole.RightToes) : Quaternion.identity;
 
-        job.offsetRotationLeftShoulder = Mapping.HasleftShoulder ? CalibratedRotationOffset(BasisLocalBoneDriver.LeftShoulderControl, Mapping.AnimatorRoot, Mapping.leftShoulder) : Quaternion.identity;
-        job.offsetRotationRightShoulder = Mapping.HasRightShoulder ? CalibratedRotationOffset(BasisLocalBoneDriver.RightShoulderControl, Mapping.AnimatorRoot, Mapping.RightShoulder) : Quaternion.identity;
+        job.offsetRotationLeftShoulder = Mapping.HasleftShoulder ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.leftShoulder, BasisBoneTrackedRole.LeftShoulder) : Quaternion.identity;
+        job.offsetRotationRightShoulder = Mapping.HasRightShoulder ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.RightShoulder, BasisBoneTrackedRole.RightShoulder) : Quaternion.identity;
 
-        job.offsetRotationHips = Mapping.HasHips ? avatarRootInv * Mapping.Hips.rotation : Quaternion.identity;
-
-        var head = BasisLocalBoneDriver.HeadControl.OutgoingWorldData;
-        job.targetPositionHead = head.position;
-        job.targetRotationHead = head.rotation;
-
-        var leftFoot = BasisLocalBoneDriver.LeftFootControl.OutgoingWorldData;
-        job.targetPositionLeftLowerLeg = leftFoot.position;
-        job.targetRotationLeftLowerLeg = leftFoot.rotation;
-
-        var rightFoot = BasisLocalBoneDriver.RightFootControl.OutgoingWorldData;
-        job.targetPositionRightLowerLeg = rightFoot.position;
-        job.targetRotationRightLowerLeg = rightFoot.rotation;
-
-        var hips = BasisLocalBoneDriver.HipsControl.OutgoingWorldData;
-        job.targetPositionHips = hips.position;
-        job.targetRotationHips = hips.rotation;
-
-        var leftHand = BasisLocalBoneDriver.LeftHandControl.OutgoingWorldData;
-        job.targetPositionLeftHand = leftHand.position;
-        job.targetRotationLeftHand = leftHand.rotation;
-
-        var rightHand = BasisLocalBoneDriver.RightHandControl.OutgoingWorldData;
-        job.targetPositionRightHand = rightHand.position;
-        job.targetRotationRightHand = rightHand.rotation;
-
-        var leftLowerArm = BasisLocalBoneDriver.LeftLowerArmControl.OutgoingWorldData;
-        var rightLowerArm = BasisLocalBoneDriver.RightLowerArmControl.OutgoingWorldData;
-        var chest = BasisLocalBoneDriver.ChestControl.OutgoingWorldData;
-        var leftLowerLeg = BasisLocalBoneDriver.LeftLowerLegControl.OutgoingWorldData;
-        var rightLowerLeg = BasisLocalBoneDriver.RightLowerLegControl.OutgoingWorldData;
-        var leftShoulder = BasisLocalBoneDriver.LeftShoulderControl.OutgoingWorldData;
-        var rightShoulder = BasisLocalBoneDriver.RightShoulderControl.OutgoingWorldData;
-
-        job.hintPositionLeftHand = BasisLocalRigDriver.ApplyHintBias(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.LeftLowerArm, leftLowerArm.position, leftLowerArm.rotation);
-        job.hintRotationLeftHand = TrackerImpliedBoneRotation(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.LeftLowerArm, leftLowerArm.rotation);
-        job.hintPositionRightHand = BasisLocalRigDriver.ApplyHintBias(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.RightLowerArm, rightLowerArm.position, rightLowerArm.rotation);
-        job.hintRotationRightHand = TrackerImpliedBoneRotation(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.RightLowerArm, rightLowerArm.rotation);
-
-        job.targetRotationLeftShoulder = leftShoulder.rotation;
-        job.targetRotationRightShoulder = rightShoulder.rotation;
-
-        job.hintPositionLeftLowerLeg = BasisLocalRigDriver.ApplyHintBias(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.LeftLowerLeg, leftLowerLeg.position, leftLowerLeg.rotation);
-        job.hintPositionRightLowerLeg = BasisLocalRigDriver.ApplyHintBias(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.RightLowerLeg, rightLowerLeg.position, rightLowerLeg.rotation);
-        job.hintRotationLeftLowerLeg = TrackerImpliedBoneRotation(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.LeftLowerLeg, leftLowerLeg.rotation);
-        job.hintRotationRightLowerLeg = TrackerImpliedBoneRotation(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.RightLowerLeg, rightLowerLeg.rotation);
-
-        job.targetPositionChestRaw = chest.position;
-        job.targetPositionChest = BasisLocalRigDriver.ApplyHintBias(Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.Chest, chest.position, chest.rotation);
-        job.targetRotationChest = chest.rotation;
+        job.offsetRotationHips = Mapping.HasHips ? BasisAvatarIKStageCalibration.PureBind(avatarRootInv, Mapping.Hips, BasisBoneTrackedRole.Hips) : Quaternion.identity;
 
         if (BasisCalibrationDebugRecorder.Enabled)
         {
@@ -139,13 +77,6 @@ public static class BasisAnimationRiggingHelper
             BasisCalibrationDebugRecorder.Rotation("Offsets", "CalibratedRotationRightHand", "offset", job.offsetRotationRightHand);
             BasisCalibrationDebugRecorder.Rotation("Offsets", "OffsetRotationHips", "offset", job.offsetRotationHips);
 
-            BasisCalibrationDebugRecorder.Pose("Offsets", "TargetHead", "target", job.targetPositionHead, job.targetRotationHead, Vector3.one);
-            BasisCalibrationDebugRecorder.Pose("Offsets", "TargetHips", "target", job.targetPositionHips, job.targetRotationHips, Vector3.one);
-            BasisCalibrationDebugRecorder.Pose("Offsets", "TargetLeftHand", "target", job.targetPositionLeftHand, job.targetRotationLeftHand, Vector3.one);
-            BasisCalibrationDebugRecorder.Pose("Offsets", "TargetRightHand", "target", job.targetPositionRightHand, job.targetRotationRightHand, Vector3.one);
-            BasisCalibrationDebugRecorder.Pose("Offsets", "TargetLeftFoot", "target", job.targetPositionLeftLowerLeg, job.targetRotationLeftLowerLeg, Vector3.one);
-            BasisCalibrationDebugRecorder.Pose("Offsets", "TargetRightFoot", "target", job.targetPositionRightLowerLeg, job.targetRotationRightLowerLeg, Vector3.one);
-
             RecordControlRest("head.ctrl", BasisLocalBoneDriver.HeadControl);
             RecordControlRest("hips.ctrl", BasisLocalBoneDriver.HipsControl);
             RecordControlRest("chest.ctrl", BasisLocalBoneDriver.ChestControl);
@@ -154,21 +85,8 @@ public static class BasisAnimationRiggingHelper
             RecordControlRest("rightFoot.ctrl", BasisLocalBoneDriver.RightFootControl);
         }
 
-        job.collisionsEnabled = true;
-        job.protectElbow = true;
-        job.collideTrackedElbow = false;
-
-        job.elbowDragEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKElbowDrag.RawValue;
-        job.elbowDragHz = Basis.BasisUI.BasisSettingsDefaults.FBIKElbowDragHz.RawValue;
-        job.enabledSpineIK = true;
         job.ikLockMode = SMModuleCalibration.CurrentIKLockMode;
-
-        job.shoulderSolveEnabled = true;
-        job.shoulderShrugEnabled = true;
-        job.shoulderElevationFactor = 0.4f;
-        job.shoulderProtractionFactor = 0.3f;
     }
-
     private static void RecordControlRest(string label, Basis.Scripts.TransformBinders.BoneControl.BasisLocalBoneControl c)
     {
         if (c == null)
@@ -181,7 +99,6 @@ public static class BasisAnimationRiggingHelper
         BasisCalibrationDebugRecorder.Pose("Offsets", label + ".TposeLocalScaled", "local", c.TposeLocalScaled.position, c.TposeLocalScaled.rotation, Vector3.one);
         BasisCalibrationDebugRecorder.Pose("Offsets", label + ".InverseOffsetFromBone", "local", c.InverseOffsetFromBone.position, c.InverseOffsetFromBone.rotation, Vector3.one);
     }
-
     private static (bool valid, Vector3 pos) GetLM(Transform[] arr, int i)
     {
         if (arr != null && i >= 0 && i < arr.Length && arr[i] != null)

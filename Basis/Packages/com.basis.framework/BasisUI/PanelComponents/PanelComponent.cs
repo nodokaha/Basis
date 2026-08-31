@@ -51,8 +51,19 @@ namespace Basis.BasisUI
         /// </summary>
         public virtual bool HasResetDefault => false;
 
+        public virtual string BoundSettingKey => null;
+
         /// <summary>Asks to reset this control to its default. No-op unless the control supports it.</summary>
         public virtual void RequestReset()
+        {
+        }
+
+        /// <summary>
+        /// Writes this control's default straight in, with no window and no question. The gesture on
+        /// a single control asks first; a section reset has already asked once for the whole section,
+        /// so its rows are written rather than each opening a confirmation of its own.
+        /// </summary>
+        public virtual void ApplyResetToDefault()
         {
         }
 

@@ -1,4 +1,5 @@
 using System;
+using Basis;
 using Basis.Cinematics;
 using UnityEngine;
 
@@ -11,9 +12,11 @@ public partial class BasisHandHeldCameraUI
         /// Bumped whenever fields are added whose zero-fill value (JsonUtility leaves absent fields
         /// at 0/false) differs from their intended default. LoadSettings migrates older files.
         /// v2 added the auto-follow config, capture toggles and MSAA. v9 replaced the auto-follow
-        /// block and the shot list with the modifier stack.
+        /// block and the shot list with the modifier stack. v10 added the camera body. v11 added
+        /// the film grading — grain shape, halation tint, vignette colour, split toning and lift.
+        /// v12 added the Aim Along Track block.
         /// </summary>
-        public const int CurrentVersion = 9;
+        public const int CurrentVersion = 12;
         public int settingsVersion = CurrentVersion;
 
         public CameraSettings()
@@ -22,10 +25,13 @@ public partial class BasisHandHeldCameraUI
 
             cameraMode = (int)BasisCameraMode.Photo;
 
-            // Empty rather than null, and never allowed to become null again: JsonUtility writes a
-            // null string as "" and reads it back as "", so a null here would be a field that
-            // provably cannot survive its own file.
-            userMode = string.Empty;
+            // A digital camera with a full load and its flash armed. The load matters: JsonUtility
+            // builds the object through this constructor before filling it, so a file written
+            // before bodies existed arrives with a fresh roll rather than an empty one — which is
+            // the difference between an older camera loading normally and one that will not fire.
+            cameraBody = (int)BasisCameraBodyKind.Digital;
+            exposuresRemaining = BasisHandHeldCamera.FullRoll;
+            flashEnabled = true;
 
             backgroundMode = 0;
             backgroundCustomColor = BasisHandHeldCamera.ChromaGreen;
@@ -33,6 +39,10 @@ public partial class BasisHandHeldCameraUI
 
             modifiers = new BasisCameraModifierStack();
             detachedMarker = (int)BasisCameraDetachedMarker.Puck;
+            // Defaulted here rather than migrated: a file written before the marker could be
+            // resized has no field to read, and JsonUtility leaves it holding this rather than
+            // zeroing it — which is the difference between the shipped marker and no marker at all.
+            detachedMarkerScale = 1f;
 
             dofMode = 2;          // Bokeh, matching the authored profile
             dofFocalLength = 50f;
@@ -55,6 +65,21 @@ public partial class BasisHandHeldCameraUI
             // loads the look it was saved with instead of a hard-edged bloom and a flat vignette.
             bloomScatter = 0.7f;
             vignetteSmoothness = 0.2f;
+
+            // The film grading, at the values that mean "leave the picture alone". None of these is
+            // its own zero: grain falls back to the thinnest texture rather than to none, bloom and
+            // the vignette tint to white and black rather than to nothing, and split toning is
+            // neutral at GREY at both ends — a black shadow colour is the strongest shift there is,
+            // not the absence of one, which is the trap in defaulting a colour to default(Color).
+            filmGrainType = 0;                      // Thin1
+            filmGrainResponse = 0.8f;               // URP's own default: grain backs off in highlights
+            bloomTint = Color.white;
+            vignetteColour = Color.black;
+            vignetteRounded = false;
+            splitToningShadows = Color.grey;
+            splitToningHighlights = Color.grey;
+            splitToningBalance = 0f;
+            filmLift = 0f;
             lensDistortionScale = 1f;
             paniniCropToFit = 1f;
             captureTonemapping = (int)UnityEngine.Rendering.Universal.TonemappingMode.ACES;
@@ -94,6 +119,7 @@ public partial class BasisHandHeldCameraUI
             motionBlurQuality = 1;   // Medium
             motionBlurMode = 0;      // Camera only — no motion vector pass
 
+            overrideVolumetricFog = false;
             VolumetricFogVolumedensity = 0.01f;
             VolumetricFogenableAPVContribution = true;
             VolumetricFogenableMainLightContribution = true;
@@ -103,6 +129,30 @@ public partial class BasisHandHeldCameraUI
             smoothDragPositionDamping = 0.4f;
             smoothDragRotationDamping = 0.5f;
             smoothDragMaxDistance = 0.25f;
+
+            vrStabilizationPositionDamping = 0.2f;
+            vrStabilizationYawDamping = 0.9f;
+            vrStabilizationPitchDamping = 0.9f;
+            vrStabilizationRollDamping = 0.9f;
+            zoomStabilization = true;
+            zoomStabilizationResponse = 1f;
+            zoomStabilizationMinScale = 0.35f;
+            zoomStabilizationMaxScale = 4f;
+
+            flySpeed = 2f;
+            flyClimbSpeed = 2f;
+            flyFastMultiplier = 3f;
+            flyTurnSpeed = 90f;
+            flyMouseSensitivity = 0.5f;
+            flyMomentum = true;
+            flyMovementFollowsPitch = true;
+
+            vrHandFlyMoveDeadzone = 0.02f;
+            vrHandFlyMoveReach = 0.25f;
+            vrHandFlyMoveSensitivity = 1f;
+            vrHandFlyTurnDeadzone = 4f;
+            vrHandFlyTurnReach = 45f;
+            vrHandFlyTurnSensitivity = 1f;
 
             gifDurationSeconds = 5f;
             gifFrameRate = 15;
@@ -116,6 +166,64 @@ public partial class BasisHandHeldCameraUI
             videoQuality = 80;
             videoTimeLimit = true;
             videoContinuousClips = false;
+
+            streamTransport = (int)(BasisHandHeldCamera.IsVideoOutputSupported ? BasisVideoTransport.Platform : BasisVideoTransport.Web);
+            streamWidth = BasisVideoOutputSettings.DefaultWidth;
+            streamHeight = BasisVideoOutputSettings.DefaultHeight;
+            streamFrameRate = BasisVideoOutputSettings.DefaultFrameRate;
+            streamQuality = BasisVideoOutputSettings.DefaultWebQuality;
+            streamPort = BasisVideoOutputSettings.DefaultWebPort;
+            streamSenderName = BasisVideoOutputSettings.DefaultSenderName;
+
+            // Global Illumination photo overrides. Off, but matching the live BasisSettingsDefaults
+            // GI defaults for every value field underneath — so turning the override on for the
+            // first time starts from what the player already sees live, not a jarring difference,
+            // and a camera that never touches these controls behaves exactly as before they existed.
+            overrideGlobalIllumination = false;
+            giMode = 0;               // Screen Space
+            giSkinnedMeshes = 1;      // Proxy
+            giLayers = 2;             // World And Avatars
+            giQuality = 1;            // Medium
+            giFallback = 2;           // Reflection Probe
+            giIgnoreBakedEmission = false;
+            giIntensity = 1f;
+            giSaturation = 1f;
+            giObscurance = 0.5f;
+            giRayLength = 16f;
+            giSmoothing = 1f;
+            giWideBlur = true;
+            giRayReuse = true;
+            giEmitters = true;
+            giEmitterIntensity = 3f;
+            giSpecular = false;
+            giObscuranceRadius = 0.5f;
+            giFadeDistance = 120f;
+            giNormalBias = 0.02f;
+            giDistanceBias = 0.0015f;
+            giBounceThreshold = 0.02f;
+            giFireflyClamp = 6f;
+            giReflectionProbes = false;
+            giMirrors = true;
+
+            // Ray Traced Ambient Occlusion photo overrides. Off, but matching the live
+            // BasisSettingsDefaults RTAO defaults underneath, for the same reason the Global
+            // Illumination ones do above.
+            overrideRTAO = false;
+            rtaoMode = 0;              // Screen Space
+            rtaoIntensity = 1f;
+            rtaoRadius = 0.02f;
+            rtaoApplyMode = 0;         // Lighting
+            rtaoDenoisePasses = 2;     // High
+            rtaoDirectStrength = 0.5f;
+            rtaoLayers = 0;            // Avatars
+            rtaoSkinnedMeshes = 1;     // Proxy
+            rtaoNormalBias = 0.005f;
+            rtaoDistanceBias = 0.0005f;
+            rtaoFalloff = 1f;
+            rtaoPower = 1f;
+            rtaoFadeStart = 40f;
+            rtaoFadeEnd = 60f;
+            rtaoSpecularRelief = 0f;
         }
 
         /// <summary>
@@ -126,15 +234,21 @@ public partial class BasisHandHeldCameraUI
         public int cameraMode;
 
         /// <summary>
-        /// The saved mode the camera was last wearing, by name, or empty for none. Looked up in
-        /// <see cref="BasisCameraUserModes"/> on load and dropped if that mode has since been
-        /// deleted or edited into something this file no longer matches.
-        ///
-        /// <para>Only the name is stored, never the mode's values: the values are already in this
-        /// file. A copy here would be a second version of the same settings, free to disagree with
-        /// both the file around it and the mode it names.</para>
+        /// The physical camera, as <see cref="BasisCameraBodyKind"/>. Saved separately from
+        /// <see cref="cameraMode"/> because it outlives it: touch one slider on a disposable and
+        /// the mode is Custom, and you are still holding a disposable.
         /// </summary>
-        public string userMode;
+        public int cameraBody;
+
+        /// <summary>
+        /// Frames left on the load, or <see cref="BasisHandHeldCamera.FullRoll"/> for a fresh one.
+        /// Saved because a disposable that refilled itself every session would never run out at
+        /// all, which is most of what makes it a disposable.
+        /// </summary>
+        public int exposuresRemaining;
+
+        /// <summary>Whether the flash is armed. Ignored on a body with nothing on the front.</summary>
+        public bool flashEnabled;
 
         public int resolutionIndex = 1;
         public int formatIndex = 0;
@@ -204,6 +318,8 @@ public partial class BasisHandHeldCameraUI
         public int autoBrightnessMetering;
         public float autoBrightnessRange;
 
+        /// <summary>Uses this camera's volumetric-fog profile instead of the world's fog.</summary>
+        public bool overrideVolumetricFog;
         public float VolumetricFogVolumedensity;
         public bool VolumetricFogenableAPVContribution;
         public bool VolumetricFogenableMainLightContribution;
@@ -216,6 +332,39 @@ public partial class BasisHandHeldCameraUI
         public float whiteBalanceTint;
         public float lensDistortion;
         public float paniniDistance;
+
+        /// <summary>
+        /// Which grain texture is used, as <c>FilmGrainLookup</c>. Size rather than strength — the
+        /// difference between the grain of a fast negative and digital noise is how big it is.
+        /// </summary>
+        public int filmGrainType;
+
+        /// <summary>How far the grain backs off in the highlights. 0 lays it evenly; 1 confines it to the shadows.</summary>
+        public float filmGrainResponse;
+
+        /// <summary>
+        /// The colour of the glow around a highlight. Orange on film, where it is halation rather
+        /// than bloom; white on anything with a sensor.
+        /// </summary>
+        public Color bloomTint;
+
+        /// <summary>What the corners darken toward, and whether they do it in a circle or with the frame.</summary>
+        public Color vignetteColour;
+        public bool vignetteRounded;
+
+        /// <summary>
+        /// The two ends of the colour split, and where the split falls. Neutral is grey at both
+        /// ends; this is the control that makes a stock rather than a filter.
+        /// </summary>
+        public Color splitToningShadows;
+        public Color splitToningHighlights;
+        public float splitToningBalance;
+
+        /// <summary>
+        /// The black point, raised. Stored as the flat offset rather than as the whole lift trackball
+        /// — the colour half is held at neutral so this cannot fight the split toning above it.
+        /// </summary>
+        public float filmLift;
 
         /// <summary>
         /// Shape, as opposed to strength. Each belongs to an effect whose own slider is the on/off,
@@ -266,6 +415,21 @@ public partial class BasisHandHeldCameraUI
         public int detachedMarker;
 
         /// <summary>
+        /// How big that marker is drawn, as a ratio of its natural size — the two-hand resize on
+        /// the puck and the panel's own slider both write here. Defaulted in the constructor rather
+        /// than migrated: an older file has no field to read and arrives holding that default, and
+        /// the zero fill would be a marker with no size at all.
+        /// </summary>
+        public float detachedMarkerScale;
+
+        /// <summary>
+        /// Whether a detached camera turned back toward you puts its feed up in front of it. Off is
+        /// the zero fill and is what shipped before it existed, so an older file loads as the
+        /// camera it was saved as and no version bump is owed.
+        /// </summary>
+        public bool puckLookAtPreview;
+
+        /// <summary>
         /// Whether a playspace anchor rides your body rather than your playspace origin. Off is the
         /// zero fill and is the steadier of the two, so an older file loads as the playspace anchor
         /// it was written as. Which anchor is selected is deliberately not saved, for the same
@@ -278,6 +442,20 @@ public partial class BasisHandHeldCameraUI
         public bool capture360;
         public bool useAutoLeveling;
         public bool useVRHandheldSmoothing;
+        public float vrStabilizationPositionDamping;
+        public float vrStabilizationYawDamping;
+        public float vrStabilizationPitchDamping;
+        public float vrStabilizationRollDamping;
+
+        /// <summary>
+        /// Stabilization follows the zoom. On is the default and defaulted in the constructor rather
+        /// than migrated, so a file written before the lens drove it loads holding the shape the
+        /// camera ships with rather than the zero fill, which would be no link at all.
+        /// </summary>
+        public bool zoomStabilization;
+        public float zoomStabilizationResponse;
+        public float zoomStabilizationMinScale;
+        public float zoomStabilizationMaxScale;
 
         /// <summary>
         /// The held camera trails the hand instead of being locked to it. Off is the zero fill, so
@@ -288,6 +466,59 @@ public partial class BasisHandHeldCameraUI
         public float smoothDragPositionDamping;
         public float smoothDragRotationDamping;
         public float smoothDragMaxDistance;
+        public float flySpeed;
+        public float flyClimbSpeed;
+        public float flyFastMultiplier;
+        public float flyTurnSpeed;
+        public float flyMouseSensitivity;
+
+        /// <summary>
+        /// On, releasing the fly controls coasts the camera to a stop; off, it stops dead. Defaulted
+        /// in the constructor rather than migrated, so a file written before it existed still glides.
+        /// </summary>
+        public bool flyMomentum;
+
+        /// <summary>
+        /// On (the fixed behaviour), VR fly's forward/strafe follow wherever the lens is aimed,
+        /// pitch included. Off restores the earlier level-only glide. Defaulted in the constructor
+        /// rather than migrated, so a file written before this existed still gets the fix rather than
+        /// silently reverting to the old behaviour it never asked to keep.
+        /// </summary>
+        public bool flyMovementFollowsPitch;
+
+        /// <summary>
+        /// On, the main menu's hotbar carries a fly switch, so flight can be armed and landed
+        /// without opening this panel. Off is the zero fill, so an older file loads without it.
+        /// </summary>
+        public bool showFlyOnMainMenu;
+
+        /// <summary>
+        /// On, the left hand's own tracked position and rotation fly the camera directly while in
+        /// VR flight, in place of the left stick. Off is the zero fill, so an older file loads with
+        /// the stick still in charge.
+        /// </summary>
+        public bool vrLeftHandFlyEnabled;
+
+        /// <summary>
+        /// On, the right hand's own tracked rotation turns the camera while in VR flight, in place
+        /// of the right stick's yaw/pitch. Off is the zero fill, so an older file loads with the
+        /// stick still in charge.
+        /// </summary>
+        public bool vrRightHandFlyRotateEnabled;
+
+        /// <summary>
+        /// Shape of the hand-fly deadzone→reach response curve and its overall gain — see the
+        /// matching fields on <see cref="BasisHandHeldCameraInteractable"/>. All defaulted in the
+        /// constructor rather than migrated, so a file written before they existed still gets a
+        /// working curve instead of a zero-fill reach/sensitivity that would make hand-fly inert.
+        /// </summary>
+        public float vrHandFlyMoveDeadzone;
+        public float vrHandFlyMoveReach;
+        public float vrHandFlyMoveSensitivity;
+        public float vrHandFlyTurnDeadzone;
+        public float vrHandFlyTurnReach;
+        public float vrHandFlyTurnSensitivity;
+        public bool resizeWithGesture;
 
         // GIF recording. Every default is set in the constructor, so an older file that lacks
         // them loads the intended values without a migration.
@@ -313,6 +544,22 @@ public partial class BasisHandHeldCameraUI
         /// </summary>
         public bool videoContinuousClips;
 
+        public int streamTransport;
+        public int streamWidth;
+        public int streamHeight;
+        public float streamFrameRate;
+        public int streamQuality;
+        public int streamPort;
+        public string streamSenderName;
+
+        /// <summary>
+        /// Direct To Screen: the feed drawn over the game window in place of the headset mirror
+        /// while the operator is in VR. Saved because it is a way of working rather than a shot —
+        /// a streamer who films from the headset wants the monitor to be the camera every session
+        /// — and off is the zero fill, so an older file loads with the window left alone.
+        /// </summary>
+        public bool directToScreen;
+
         /// <summary>
         /// Whether each saved photo is also printed into the world as a shared image pickup,
         /// exactly as if its file had been drag-and-dropped onto the window.
@@ -324,5 +571,81 @@ public partial class BasisHandHeldCameraUI
         public Color backgroundCustomColor;
         public bool backgroundKeepsWorld;
 
+        /// <summary>
+        /// Whether this camera's photo captures substitute the 24 fields below for the player's own
+        /// live Global Illumination settings. Off by default, so an old file — and a fresh camera —
+        /// behaves exactly as it did before this existed: a capture uses whatever GI the player has
+        /// live, same as every other camera. Unconditional (no platform guard) like every other
+        /// field here, even though only a <c>BASIS_HAS_GI</c> build ever reads it, so the file still
+        /// round-trips on a platform that compiles GI out.
+        /// </summary>
+        public bool overrideGlobalIllumination;
+
+        /// <summary>Index into <c>SMModuleGlobalIlluminationURP.ModeOptions</c> (Screen Space / Ray Traced).</summary>
+        public int giMode;
+        /// <summary>Index into <c>SMModuleGlobalIlluminationURP.SkinnedMeshesOptions</c> (Off / Proxy). Ray traced only.</summary>
+        public int giSkinnedMeshes;
+        /// <summary>Index into <c>SMModuleGlobalIlluminationURP.LayersOptions</c> (Avatars / World / World And Avatars). Ray traced only.</summary>
+        public int giLayers;
+        /// <summary>Index into <c>SMModuleGlobalIlluminationURP.QualityOptions</c> (Low / Medium / High / Ultra).</summary>
+        public int giQuality;
+        /// <summary>Index into <c>SMModuleGlobalIlluminationURP.FallbackOptions</c> (None / Sky / Reflection Probe).</summary>
+        public int giFallback;
+        /// <summary>Ray traced only — lets a baked-emissive surface's light back into the gather.</summary>
+        public bool giIgnoreBakedEmission;
+        public float giIntensity;
+        public float giSaturation;
+        public float giObscurance;
+        public float giRayLength;
+        public float giSmoothing;
+        public bool giWideBlur;
+        /// <summary>Screen space only.</summary>
+        public bool giRayReuse;
+        public bool giEmitters;
+        public float giEmitterIntensity;
+        /// <summary>Ray traced reflections. Independent of <see cref="giMode"/> by design.</summary>
+        public bool giSpecular;
+        public float giObscuranceRadius;
+        public float giFadeDistance;
+        /// <summary>Ray traced only.</summary>
+        public float giNormalBias;
+        /// <summary>Ray traced only.</summary>
+        public float giDistanceBias;
+        /// <summary>Ray traced only.</summary>
+        public float giBounceThreshold;
+        public float giFireflyClamp;
+        public bool giReflectionProbes;
+        public bool giMirrors;
+
+        /// <summary>
+        /// Whether this camera's photo captures substitute the 15 fields below for the player's own
+        /// live Ray Traced Ambient Occlusion settings. Off by default, mirroring
+        /// <see cref="overrideGlobalIllumination"/> exactly - same reasoning, same shape.
+        /// </summary>
+        public bool overrideRTAO;
+
+        /// <summary>0 = Screen Space, 1 = Ray Traced.</summary>
+        public int rtaoMode;
+        public float rtaoIntensity;
+        public float rtaoRadius;
+        /// <summary>0 = Lighting, 1 = Final Image.</summary>
+        public int rtaoApplyMode;
+        /// <summary>0-3, matching <c>BasisRTAOSettingsMap.ReadDenoisePasses</c> (Off/Standard/High/Maximum).</summary>
+        public int rtaoDenoisePasses;
+        /// <summary>Only matters when <see cref="rtaoApplyMode"/> is Lighting.</summary>
+        public float rtaoDirectStrength;
+        /// <summary>0 = Avatars, 1 = World, 2 = World And Avatars. Ray traced only.</summary>
+        public int rtaoLayers;
+        /// <summary>0 = Off, 1 = Proxy. Ray traced only.</summary>
+        public int rtaoSkinnedMeshes;
+        /// <summary>Ray traced only.</summary>
+        public float rtaoNormalBias;
+        /// <summary>Ray traced only.</summary>
+        public float rtaoDistanceBias;
+        public float rtaoFalloff;
+        public float rtaoPower;
+        public float rtaoFadeStart;
+        public float rtaoFadeEnd;
+        public float rtaoSpecularRelief;
     }
 }

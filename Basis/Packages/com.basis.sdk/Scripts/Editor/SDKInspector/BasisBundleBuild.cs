@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Basis.Editor.Localization;
 using Basis.Scripts.BasisSdk;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
@@ -50,11 +51,9 @@ public static class BasisBundleBuild
             }
         }
 
-        var meta = GenerateMetaData(BasisContentBase.gameObject);
         string FolderPath = MakeSafeFolderName(BasisContentBase.BasisBundleDescription.AssetBundleName);
         return await BuildBundle(FolderPath,
             basisContentBase: BasisContentBase,
-            MetaData: meta,
             BasisBounds: BasisBounds,
             Images: Image,
             targets: Targets,
@@ -71,7 +70,8 @@ public static class BasisBundleBuild
     public static Bounds CalculateLocalRenderBounds(GameObject parent)
     {
         var renderers = parent.GetComponentsInChildren<Renderer>(true);
-        if (renderers == null || renderers.Length == 0)
+        var rects = parent.GetComponentsInChildren<RectTransform>(true);
+        if ((renderers == null || renderers.Length == 0) && (rects == null || rects.Length == 0))
             return new Bounds(Vector3.zero, Vector3.zero);
 
         Matrix4x4 parentWorldToLocal = parent.transform.worldToLocalMatrix;
@@ -116,6 +116,26 @@ public static class BasisBundleBuild
             {
                 accum.Encapsulate(transformed.min);
                 accum.Encapsulate(transformed.max);
+            }
+        }
+
+        Vector3[] corners = new Vector3[4];
+        foreach (var rect in rects)
+        {
+            if (rect == null) continue;
+            rect.GetWorldCorners(corners);
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 corner = parentWorldToLocal.MultiplyPoint3x4(corners[i]);
+                if (!hasAny)
+                {
+                    accum = new Bounds(corner, Vector3.zero);
+                    hasAny = true;
+                }
+                else
+                {
+                    accum.Encapsulate(corner);
+                }
             }
         }
 
@@ -175,11 +195,9 @@ public static class BasisBundleBuild
         var unitybounds = CalculateSceneBounds(scene);
         BasisBounds BasisBounds = new BasisBounds(unitybounds.center, unitybounds.size);
 
-        var meta = GenerateSceneMetaData(scene);
         string FolderName = MakeSafeFolderName(BasisContentBase.BasisBundleDescription.AssetBundleName);
         return await BuildBundle(FolderName,
             basisContentBase: BasisContentBase,
-            MetaData: meta,
             BasisBounds: BasisBounds,
             Images: Image,
             targets: Targets,
@@ -466,14 +484,13 @@ public static class BasisBundleBuild
     }
     public static async Task<(bool, string)> BuildBundle(string FolderName,
       BasisContentBase basisContentBase,
-      BasisBundleConnector.BasisMetaData MetaData,
       BasisBounds BasisBounds,
       string Images,
       List<BuildTarget> targets,
       bool useProvidedPassword,
       string OverriddenPassword,
       Func<BasisContentBase, BasisAssetBundleObject, string, BuildTarget, string,
-           Task<(bool, (BasisBundleGenerated, AssetBundleBuilder.InformationHash))>> buildFunction,
+           Task<(bool, BasisBundleBuildResult)>> buildFunction,
       string FarLodBase64 = null)
     {
         string generatedID = null;
@@ -529,6 +546,8 @@ public static class BasisBundleBuild
             List<BasisBundleGenerated> bundles = new List<BasisBundleGenerated>(targetsLength + 1);
             List<string> paths = new List<string>();
 
+            bool metaDataSet = false;
+            BasisBundleConnector.BasisMetaData MetaData = default;
             for (int Index = 0; Index < targetsLength; Index++)
             {
                 BuildTarget target = targets[Index];
@@ -540,12 +559,18 @@ public static class BasisBundleBuild
                     return (false, $"Failure While Building for {target}");
                 }
 
-                bundles.Add(result.Item1);
+                if (!metaDataSet)
+                {
+                    MetaData = result.BasisMetaData;
+                    metaDataSet = true;
+                }
 
-                string hashPath = PathConversion(result.Item2.EncyptedPath);
+                bundles.Add(result.BasisBundleGenerated);
+
+                string hashPath = PathConversion(result.InformationHash.EncyptedPath);
                 paths.Add(hashPath);
 
-                BasisDebug.Log("Adding " + result.Item2.EncyptedPath);
+                BasisDebug.Log("Adding " + result.InformationHash.EncyptedPath);
             }
 
             // Avatars additionally get a platform-agnostic Generic (glTF) section, appended
@@ -858,28 +883,18 @@ public static class BasisBundleBuild
     // Convert a Unity path to a platform-compatible path and open it in File Explorer
     public static void OpenFolderInExplorer(string folderPath)
     {
-#if UNITY_EDITOR_LINUX
-        string osPath = folderPath;
-#elif UNITY_EDITOR_OSX
-        string osPath = folderPath;
-#else
-        // Convert Unity-style file path (forward slashes) to Windows-style (backslashes)
-        string osPath = folderPath.Replace("/", "\\");
-#endif
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            Debug.LogError("Path was empty, nothing to open.");
+            return;
+        }
+
+        string osPath = Path.GetFullPath(folderPath);
 
         // Check if the path exists
         if (Directory.Exists(osPath) || File.Exists(osPath))
         {
-#if UNITY_EDITOR_LINUX
-            // On Linux, use 'xdg-open'
-            System.Diagnostics.Process.Start("xdg-open", osPath);
-#elif UNITY_EDITOR_OSX
-            // On Mac, use 'open'
-            System.Diagnostics.Process.Start("open", osPath);
-#else
-            // On Windows, use 'explorer' to open the folder or highlight the file
-            System.Diagnostics.Process.Start("explorer.exe", osPath);
-#endif
+            EditorUtility.OpenWithDefaultApp(osPath);
         }
         else
         {
@@ -921,5 +936,19 @@ public static class BasisBundleBuild
         }
         Debug.Log("Hexadecimal string conversion successful.");
         return hex.ToString();
+    }
+
+    public class BasisBundleBuildResult
+    {
+        public BasisBundleBuildResult(BasisBundleGenerated basisBundleGenerated, AssetBundleBuilder.InformationHash informationHash, BasisBundleConnector.BasisMetaData basisMetaData)
+        {
+            BasisBundleGenerated = basisBundleGenerated;
+            InformationHash = informationHash;
+            BasisMetaData = basisMetaData;
+        }
+
+        public BasisBundleGenerated BasisBundleGenerated { get; }
+        public AssetBundleBuilder.InformationHash InformationHash { get; }
+        public BasisBundleConnector.BasisMetaData BasisMetaData { get; }
     }
 }

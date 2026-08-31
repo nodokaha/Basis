@@ -42,12 +42,28 @@ public static class BasisGizmoManager
             }
             return renderLayer;
         }
-        set => renderLayer = value;
+        set
+        {
+            if (renderLayer == value)
+            {
+                return;
+            }
+            renderLayer = value;
+            ApplySharedLayerToLabels();
+        }
     }
 
     private const int LayerNotResolved = -2;
+
+    /// <summary>
+    /// Default — the layer the world itself is on, so every camera in the scene renders it.
+    /// Where <see cref="RenderInAllCameras"/> puts gizmos.
+    /// </summary>
+    private const int AllCameraLayer = 0;
+
     private static int renderLayer = LayerNotResolved;
-    private static int defaultRenderLayer = LayerNotResolved;
+    private static int overlayLayer = LayerNotResolved;
+    private static bool renderInAllCameras;
 
     /// <summary>
     /// Where gizmos live unless something moves them: OverlayUI.
@@ -59,20 +75,80 @@ public static class BasisGizmoManager
     /// else, which is what makes the waypoint markers already sitting on it grabbable.</para>
     ///
     /// <para>Falls back to the Default layer in a project that does not define OverlayUI, which is
-    /// where gizmos used to live — visible to every camera including the capture.</para>
+    /// where gizmos used to live — visible to every camera including the capture. Turning
+    /// <see cref="RenderInAllCameras"/> on asks for that same layer deliberately.</para>
     /// </summary>
     public static int DefaultRenderLayer
     {
         get
         {
-            if (defaultRenderLayer == LayerNotResolved)
+            if (renderInAllCameras)
+            {
+                return AllCameraLayer;
+            }
+            if (overlayLayer == LayerNotResolved)
             {
                 int overlayUi = LayerMask.NameToLayer("OverlayUI");
-                defaultRenderLayer = overlayUi >= 0 ? overlayUi : 0;
+                overlayLayer = overlayUi >= 0 ? overlayUi : AllCameraLayer;
             }
-            return defaultRenderLayer;
+            return overlayLayer;
         }
     }
+
+    /// <summary>
+    /// Whether gizmos are drawn for every camera in the scene rather than only the ones that
+    /// render <see cref="DefaultRenderLayer"/>. Off by default: gizmos belong to the person
+    /// operating the thing they describe, so photos, streams and the follow PIP stay clean.
+    /// On moves them to the Default layer the world itself is on, which every camera renders —
+    /// captures, mirrors and any world camera then show what the player sees.
+    /// <para>
+    /// Gizmos parked on a layer of their own with <see cref="SetGizmoLayer"/> stay there: those
+    /// are a camera rig's own markers (its frustum, its dolly track, the follow puck), kept out
+    /// of its own shot on purpose rather than by this default.
+    /// </para>
+    /// </summary>
+    public static bool RenderInAllCameras
+    {
+        get => renderInAllCameras;
+        set
+        {
+            if (renderInAllCameras == value)
+            {
+                return;
+            }
+            int previousDefault = DefaultRenderLayer;
+            renderInAllCameras = value;
+            // Anything that pointed RenderLayer somewhere of its own — the calibration mirror
+            // relay — keeps it, and restores to DefaultRenderLayer, which now reads the new value.
+            if (renderLayer == LayerNotResolved || renderLayer == previousDefault)
+            {
+                RenderLayer = DefaultRenderLayer;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether gizmos punch through the world (ZTest Always, overlay queue) or are occluded
+    /// by whatever is in front of them (ZTest LessEqual, transparent queue). Off by default:
+    /// depth-testing is what tells you whether a probe is actually in front of the geometry
+    /// it describes, and gizmos that ignore depth read as a flat overlay with no relationship
+    /// to the scene. Covers all three primitive kinds: spheres, lines and text labels.
+    /// </summary>
+    public static bool DrawOnTop
+    {
+        get => drawOnTop;
+        set
+        {
+            if (drawOnTop == value)
+            {
+                return;
+            }
+            drawOnTop = value;
+            ApplyDepthMode();
+        }
+    }
+
+    private static bool drawOnTop;
 
     /// <summary>
     /// Optional viewer-distance cull for sphere/line gizmos, in meters. Defaults to
@@ -109,6 +185,7 @@ public static class BasisGizmoManager
         if (Parent == null)
         {
             Parent = new GameObject("Parent Of Debug Data");
+            Parent.layer = RenderLayer;
         }
     }
 
@@ -164,6 +241,7 @@ public static class BasisGizmoManager
     {
         public BasisTextGizmos Component;
         public Vector3 Position;   // last requested — ranks nearest-K even while hidden
+        public int Layer = -1;     // -1 follows RenderLayer; see SetGizmoLayer
         public bool Active = true;
         public bool Visible = true;
     }
@@ -543,6 +621,53 @@ public static class BasisGizmoManager
         return _textOverlayShader;
     }
 
+    // The shader the font asset's own material came with, captured before the first overlay
+    // swap so DrawOnTop can put it back. A font whose material is already an Overlay variant
+    // has no depth-testing shader to return to, so the non-overlay counterpart is resolved by
+    // name ("TextMeshPro/[Mobile/]Distance Field Overlay" -> the same minus " Overlay").
+    private static Shader _textDepthShader;
+
+    private static Shader ResolveLabelShader(Shader fontShader)
+    {
+        if (_textDepthShader == null && fontShader != null)
+        {
+            _textDepthShader = fontShader.name.EndsWith(" Overlay", StringComparison.Ordinal)
+                ? Shader.Find(fontShader.name.Substring(0, fontShader.name.Length - " Overlay".Length)) ?? fontShader
+                : fontShader;
+        }
+        if (!drawOnTop)
+        {
+            return _textDepthShader;
+        }
+        Shader overlay = GetTextOverlayShader();
+        return overlay != null ? overlay : _textDepthShader;
+    }
+
+    private static void ApplyLabelDepthMode()
+    {
+        foreach (KeyValuePair<int, TextSlot> kvp in _textByID)
+        {
+            ApplyLabelDepthMode(kvp.Value.Component);
+        }
+        foreach (BasisTextGizmos pooled in _labelPool)
+        {
+            ApplyLabelDepthMode(pooled);
+        }
+    }
+
+    private static void ApplyLabelDepthMode(BasisTextGizmos component)
+    {
+        if (component == null || component.MaterialInstance == null)
+        {
+            return;
+        }
+        Shader target = ResolveLabelShader(component.MaterialInstance.shader);
+        if (target != null && component.MaterialInstance.shader != target)
+        {
+            component.MaterialInstance.shader = target;
+        }
+    }
+
     private static BasisTextGizmos RentLabel(string gizmoName, Vector3 position, string text, Color color)
     {
         BasisTextGizmos component = null;
@@ -566,8 +691,8 @@ public static class BasisGizmoManager
         t.position = position;
         component.gameObject.name = gizmoName;
         // A label that came back from the pool still carries whatever layer SetGizmoLayer put
-        // it on; the next renter has not asked for that, so it starts on the container's layer.
-        component.gameObject.layer = Parent.layer;
+        // it on; the next renter has not asked for that, so it starts on the shared layer.
+        component.gameObject.layer = RenderLayer;
         component.ResetContent(text, color);
         component.gameObject.SetActive(true);
         return component;
@@ -612,16 +737,19 @@ public static class BasisGizmoManager
             meshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
         }
 
-        // Like the sphere/line gizmos, labels must draw ON TOP of the avatar/world
-        // rather than be depth-occluded inside the body. TMP's default material
-        // depth-tests; swap this instance to the Overlay variant (ZTest Always).
+        // Like the sphere/line gizmos, labels follow DrawOnTop: TMP's default material
+        // depth-tests, so drawing on top swaps this instance to the Overlay variant
+        // (ZTest Always) and depth-respecting mode leaves the font's own shader in place.
         // fontMaterial instantiates a per-label clone — keep the reference so the
         // pool can destroy it instead of leaking one per label ever created.
         Material fontMaterialInstance = tmp.fontMaterial;
-        Shader overlay = GetTextOverlayShader();
-        if (overlay != null && fontMaterialInstance != null)
+        if (fontMaterialInstance != null)
         {
-            fontMaterialInstance.shader = overlay;
+            Shader target = ResolveLabelShader(fontMaterialInstance.shader);
+            if (target != null && fontMaterialInstance.shader != target)
+            {
+                fontMaterialInstance.shader = target;
+            }
         }
 
         BasisTextGizmos holder = go.AddComponent<BasisTextGizmos>();
@@ -741,6 +869,7 @@ public static class BasisGizmoManager
         }
         if (_textByID.TryGetValue(linkedID, out TextSlot text) && text.Component != null)
         {
+            text.Layer = layer;
             text.Component.gameObject.layer = ResolveLayer(layer);
             return true;
         }
@@ -751,6 +880,29 @@ public static class BasisGizmoManager
     private static int ResolveLayer(int slotLayer)
     {
         return slotLayer >= 0 ? slotLayer : RenderLayer;
+    }
+
+    /// <summary>
+    /// Moves the label objects that follow the shared layer onto it. Spheres and lines are
+    /// batched draws whose layer is read at submission, so they need nothing; labels are
+    /// GameObjects and carry the layer they were rented on until something rewrites it.
+    /// </summary>
+    private static void ApplySharedLayerToLabels()
+    {
+        int layer = RenderLayer;
+        if (Parent != null)
+        {
+            Parent.layer = layer;
+        }
+        foreach (KeyValuePair<int, TextSlot> kvp in _textByID)
+        {
+            TextSlot slot = kvp.Value;
+            if (slot.Layer >= 0 || slot.Component == null)
+            {
+                continue;
+            }
+            slot.Component.gameObject.layer = layer;
+        }
     }
 
     /// <summary>
@@ -777,6 +929,33 @@ public static class BasisGizmoManager
                 text.Component.SetVisible(false);
             }
         }
+    }
+
+    /// <summary>
+    /// One-line dump of everything between a submitted gizmo and a pixel: how many slots exist,
+    /// how many pass the drawable test, the layer they are submitted on, and whether the line
+    /// material resolved. Every one of these fails the same way from the outside -- nothing on
+    /// screen -- so a caller chasing "my gizmo does not show" needs all of them at once.
+    /// </summary>
+    public static string DescribeState(Vector3 viewer)
+    {
+        int lineSlots = _linesByID.Count;
+        int drawableLines = 0;
+        float maxDistSq = float.IsPositiveInfinity(MaxDrawDistance) ? float.PositiveInfinity : MaxDrawDistance * MaxDrawDistance;
+        int inactive = 0, degenerate = 0, culled = 0;
+        foreach (KeyValuePair<int, LineSlot> kvp in _linesByID)
+        {
+            LineSlot slot = kvp.Value;
+            if (!slot.Active) { inactive++; continue; }
+            if (slot.Count < 2) { degenerate++; continue; }
+            if (!(maxDistSq >= float.PositiveInfinity) && (slot.Points[0] - viewer).sqrMagnitude > maxDistSq) { culled++; continue; }
+            drawableLines++;
+        }
+        return $"lines slots={lineSlots} drawable={drawableLines} (inactive={inactive} degenerate={degenerate} distanceCulled={culled})"
+            + $" | spheres={_sphereByID.Count} labels={_textByID.Count}"
+            + $" | layer={RenderLayer} ('{LayerMask.LayerToName(RenderLayer)}') renderInAllCameras={RenderInAllCameras}"
+            + $" | lineMaterial={(_lineMaterial != null ? _lineMaterial.shader.name : "NULL -- shader missing")}"
+            + $" | drawOnTop={DrawOnTop} maxDrawDistance={MaxDrawDistance}";
     }
 
     /// <summary>True while a gizmo with this ID exists in any of the stores.</summary>
@@ -883,6 +1062,30 @@ public static class BasisGizmoManager
     private static readonly List<int> _sphereLayerScratch = new List<int>();
     private static readonly List<MaterialPropertyBlock> _sphereChunkBlocks = new List<MaterialPropertyBlock>();
     private static readonly int ColorProperty = Shader.PropertyToID("_Color");
+    private static readonly int ZTestProperty = Shader.PropertyToID("_ZTest");
+
+    /// <summary>
+    /// Pushes <see cref="DrawOnTop"/> onto the shared sphere/line materials and every live
+    /// label. Render state comes off the material itself — a MaterialPropertyBlock cannot
+    /// override a <c>ZTest [_ZTest]</c> expression — so the two batched materials carry the
+    /// mode for every gizmo drawn through them.
+    /// </summary>
+    private static void ApplyDepthMode()
+    {
+        ApplyMaterialDepthMode(_sphereMaterial);
+        ApplyMaterialDepthMode(_lineMaterial);
+        ApplyLabelDepthMode();
+    }
+
+    internal static void ApplyMaterialDepthMode(Material material)
+    {
+        if (material == null)
+        {
+            return;
+        }
+        material.SetFloat(ZTestProperty, (float)(drawOnTop ? CompareFunction.Always : CompareFunction.LessEqual));
+        material.renderQueue = (int)(drawOnTop ? RenderQueue.Overlay : RenderQueue.Transparent);
+    }
 
     // Field order mirrors the attribute order Unity requires in a vertex layout
     // (Position, then Color, then TexCoords) — SetVertexBufferParams rejects
@@ -1289,6 +1492,7 @@ public static class BasisGizmoManager
             {
                 enableInstancing = true,
             };
+            ApplyMaterialDepthMode(_sphereMaterial);
         }
         if (_sphereMesh == null)
         {
@@ -1318,6 +1522,7 @@ public static class BasisGizmoManager
                 return false;
             }
             _lineMaterial = new Material(shader);
+            ApplyMaterialDepthMode(_lineMaterial);
         }
         if (batch.Mesh == null)
         {

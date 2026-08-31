@@ -4,45 +4,25 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
-
 namespace Basis.IK
 {
     [BurstCompile]
     public static class BasisVirtualSpineCore
     {
         private const float StanceRadiusFrac = 0.12f;
-
         private const float CrouchLeanAllowanceFrac = 0.70f;
-
         private const float HeadBaselineFollowRateRest = 2f;
-
         private const float HeadBaselineFollowRateGain = 250f;
-
         private const float CounterbalanceFollowFrac = 0.25f;
-
         private const float CounterbalanceLateralFollowFrac = 0.8f;
-
         private const float FootPendulumLeanFrac = 0.20f;
-
         private const float TorsoYawRelockSpeedDeg = 6f;
-
-        /// <summary>
-        /// How much of the spine's reach the synthesised pelvis may demand. Kept under 1 so the pelvis stays
-        /// clear of the taut band rather than sitting on its edge, where the solve starts trading head
-        /// accuracy for span.
-        /// </summary>
         private const float ReachUseCeiling = 0.97f;
-
         public struct SpineSolveParams
         {
-            public float Dt;
-            public float Scale;
-
-            public float TrackingLiftY;
+            public float Dt, Scale, TrackingLiftY;
             public float4x4 ParentMatrix;
-            public quaternion ParentRotation;
-            public quaternion EyeRot;
-
+            public quaternion ParentRotation, EyeRot;
             public float3 HeadTargetPos;
             public quaternion HeadTargetRot;
             public float3 NeckTargetPos;
@@ -51,86 +31,31 @@ namespace Basis.IK
             public quaternion ChestTargetRot;
             public float3 SpineTargetPos;
             public quaternion SpineTargetRot;
-
-            public float3 HeadScaledOffset;
-            public float3 NeckScaledOffset;
-            public float3 ChestScaledOffset;
-            public float3 SpineScaledOffset;
-
-            public float ChestTposeY;
-            public float SpineTposeY;
-            public float3 TposeHips;
-
-            public float3 LeftFootPos;
-            public float3 RightFootPos;
-            public byte LeftFootTracked;
-            public byte RightFootTracked;
-
-            public float ChestPitchFrac;
-            public float ChestRollFrac;
-            public float SpinePitchFrac;
-            public float SpineRollFrac;
-            public float NeckRotationSpeed;
-            public float ChestRotationSpeed;
-            public float SpineRotationSpeed;
-            public float HipsRotationSpeed;
-
-            /// <summary>
-            /// Eye-from-nod-pivot, head local: the arm the HMD actually swings on when the user nods.
-            /// Seeded from the avatar's authored eye-to-head offset and refined from HMD motion by
-            /// <see cref="BasisNodPivotSampler"/>, because the avatar's authoring is a rendering offset
-            /// and has no reason to match the user's own cervical geometry.
-            /// </summary>
+            public float3 HeadScaledOffset, NeckScaledOffset, ChestScaledOffset, SpineScaledOffset;
+            public float ChestTposeY, SpineTposeY;
+            public float3 TposeHips, LeftFootPos, RightFootPos;
+            public byte LeftFootTracked, RightFootTracked;
+            public float ChestPitchFrac, ChestRollFrac, SpinePitchFrac, SpineRollFrac, NeckRotationSpeed;
+            public float ChestRotationSpeed, SpineRotationSpeed, HipsRotationSpeed;
             public float3 GazeSwingLever;
-
-            /// <summary>T-pose neck height above the eye. Anchors the pelvis to the nod pivot instead of to the swinging neck estimate.</summary>
-            public float TposeNeckMinusEyeY;
-
-            public float GazeSwingRemoval;
-            public float HipsForwardBias;
-
-            public float NeckExtensionDamp;
-            public float NeckFlexionDamp;
-            public float TorsoYawDeadzoneDeg;
-            public float TorsoYawBlendSpeed;
-
-            public byte HipsFreeze;
-            public byte IsLocomoting;
-
-            public float LenTotal;
-            public float TChest;
-            public float TSpine;
-
-            public float StandingHipsLocalY;
-            public float StandingHeadLocalY;
-
-            public float3 EyePos;
-
-            public float3 HipsAnchorOffsetLocal;
-
-            public float3 HeadRestFromEyeLocal;
-
-            public float3 YawPivotFromEyeLocal;
-
+            public float TposeNeckMinusEyeY, GazeSwingRemoval, HipsForwardBias, NeckExtensionDamp, NeckFlexionDamp;
+            public float TorsoYawDeadzoneDeg, TorsoYawBlendSpeed;
+            public byte HipsFreeze, IsLocomoting;
+            public float LenTotal, TChest, TSpine, StandingHipsLocalY, StandingHeadLocalY;
+            public float3 EyePos, HipsAnchorOffsetLocal, HeadRestFromEyeLocal, YawPivotFromEyeLocal;
             public byte PostureModel;
-            public float HipsCompressionStrength;
-            public float HipsMaxDropMeters;
+            public float HipsCompressionStrength, HipsMaxDropMeters, HipsRestDropY;
         }
-
         public struct SpineSolveState
         {
             public float3 HeadBaselineXZ;
             public byte HeadBaselineInitialized;
-
             public float StandingHeadRefY;
-
             public byte TorsoYawInitialized;
-            public float TorsoYawAnchorDeg;
-            public float PrevHeadYawDeg;
+            public float TorsoYawAnchorDeg, PrevHeadYawDeg;
             public byte TorsoYawBroken;
             public float TorsoFollow;
         }
-
         [BurstCompile]
         public struct BasisVirtualSpineSolveJob : IJob
         {
@@ -138,21 +63,8 @@ namespace Basis.IK
             public NativeArray<BasisBoneSimState> States;
             public NativeArray<SpineSolveState> State;
             public SpineSolveParams P;
-            public int IdxHead;
-            public int IdxNeck;
-            public int IdxChest;
-            public int IdxSpine;
-            public int IdxHips;
-
-            // A bone with a real tracker is the tracker's to pose, not this solve's — the driver
-            // sets 1 for tracked bones and the write is skipped (the solve still uses the virtual
-            // value internally for chain placement). Default 0 = write, the historical behavior.
-            public byte SkipHead;
-            public byte SkipNeck;
-            public byte SkipChest;
-            public byte SkipSpine;
-            public byte SkipHips;
-
+            public int IdxHead, IdxNeck, IdxChest, IdxSpine, IdxHips;
+            public byte SkipHead, SkipNeck, SkipChest, SkipSpine, SkipHips;
             public void Execute()
             {
                 BasisBoneSimState head = States[IdxHead];
@@ -176,11 +88,9 @@ namespace Basis.IK
                 head.OutgoingPosition = headPos;
                 ApplyWorldAndLastBurst(ref head, in P.ParentMatrix, in P.ParentRotation);
 
-                float3 rawUp = math.mul(P.ParentMatrix, new float4(0f, 1f, 0f, 0f)).xyz;
-                NormalizeSafeWithFallback(in rawUp, new float3(0f, 1f, 0f), out float3 worldUp);
+                float3 solveUp = new float3(0f, 1f, 0f);
 
-                float3 neckPos0 = BasisNeckCueCore.Solve(P.NeckTargetPos, P.NeckTargetRot, P.NeckScaledOffset,
-                    worldUp, P.NeckExtensionDamp, P.NeckFlexionDamp);
+                float3 neckPos0 = BasisNeckCueCore.Solve(P.NeckTargetPos, P.NeckTargetRot, P.NeckScaledOffset, solveUp, P.NeckExtensionDamp, P.NeckFlexionDamp);
                 neck.OutgoingPosition = neckPos0;
                 ApplyWorldAndLastBurst(ref neck, in P.ParentMatrix, in P.ParentRotation);
 
@@ -200,15 +110,11 @@ namespace Basis.IK
 
                 float standingHeadLifted = P.StandingHeadLocalY + P.TrackingLiftY;
                 float headRestCandidate = math.min(headPosWorld.y, standingHeadLifted);
-                s.StandingHeadRefY = s.HeadBaselineInitialized == 0
-                    ? headRestCandidate
-                    : math.max(s.StandingHeadRefY, headRestCandidate);
+                s.StandingHeadRefY = s.HeadBaselineInitialized == 0 ? headRestCandidate : math.max(s.StandingHeadRefY, headRestCandidate);
                 float stanceHeadDrop = math.max(0f, s.StandingHeadRefY - headPosWorld.y);
 
                 bool feetSupported = P.LeftFootTracked != 0 && P.RightFootTracked != 0;
 
-                // Only the estimator path reads the HMD to guess where the user is standing, so only it
-                // has an arc to remove; the feet-midpoint path is measured and stays as it was.
                 float3 yawArm = feetSupported ? float3.zero : P.YawPivotFromEyeLocal * P.GazeSwingRemoval;
 
                 float3 leashEyePos = eyePosDevice + math.mul(headYawFromEye, yawArm);
@@ -220,16 +126,9 @@ namespace Basis.IK
                     float gazePitchDeg = math.degrees(math.atan2(-gazeFwd.y, gazeHorizMag));
                     YawDegrees(in headYawFromEye, out float gazeYawDeg);
 
-                    BasisHeadPitchSwingInput swing;
-                    swing.PitchDeg = gazePitchDeg;
-                    swing.YawDeg = gazeYawDeg;
-                    swing.EyeFromNeck = P.GazeSwingLever;
-                    swing.Strength = P.GazeSwingRemoval;
+                    BasisHeadPitchSwingCore.Solve(gazePitchDeg, gazeYawDeg, P.GazeSwingLever, P.GazeSwingRemoval, 1f, out UnityEngine.Vector3 swingOffset, out _);
 
-                    swing.BackwardScale = 1f;
-                    BasisHeadPitchSwingCore.Solve(swing, out BasisHeadPitchSwingResult swingResult);
-
-                    leashEyePos -= (float3)swingResult.Offset;
+                    leashEyePos -= (float3)swingOffset;
                 }
 
                 float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref s, leashEyePos, dt, P.StandingHeadLocalY, stanceHeadDrop, in torsoYawTarget, P.LeftFootPos, P.RightFootPos, P.LeftFootTracked != 0, P.RightFootTracked != 0, out float3 supportXZ);
@@ -242,13 +141,6 @@ namespace Basis.IK
                     supportXZ += new float3(headRestArm.x, 0f, headRestArm.z);
                 }
 
-                // hipsBase hangs the pelvis a fixed chain length below the neck, so whatever the neck
-                // estimate does vertically the pelvis does too -- and the neck estimate is built off the
-                // head bone, which is welded to the HMD and therefore rides the nod arc. Measured: 3.5 cm
-                // of pelvis lift on a 75 degree look with the feet planted, in both directions. Hang it
-                // off the nod pivot instead, the one point on the head a nod does not move. Genuine
-                // vertical travel -- crouch, jump, playspace lift -- still passes straight through,
-                // because it carries the pivot along with the HMD.
                 float3 neckForHips = neckPosWorld;
                 if (P.GazeSwingRemoval > 0f)
                 {
@@ -256,44 +148,18 @@ namespace Basis.IK
                     float stableNeckY = nodPivot.y + P.TposeNeckMinusEyeY + P.GazeSwingLever.y;
                     neckForHips.y = math.lerp(neckPosWorld.y, stableNeckY, math.saturate(P.GazeSwingRemoval));
 
-                    // Holding the pelvis still is right, but it lengthens the span the spine has to cover,
-                    // and SolveSequentialSpineIK resolves a taut chain by projecting the HEAD onto the reach
-                    // sphere -- which takes the avatar's head off the HMD. The head is measured and the
-                    // pelvis is invented, so the pelvis is the one that gives.
-                    //
-                    // The ceiling is the UNANCHORED neck: this may pull back toward the height the pelvis
-                    // used to sit at, and no further. That makes it a bit-exact no-op at rest (where the two
-                    // agree) and bounds the anchor to "never demands more reach than the old law did",
-                    // rather than introducing a taut-band trigger of its own on a rig with little slack.
                     float reach = (P.LenTotal + math.distance(neckPosWorld, headPosWorld)) * ReachUseCeiling;
                     float2 spanXZ = new float2(headPosWorld.x - desiredHipsXZ.x, headPosWorld.z - desiredHipsXZ.z);
                     float horizSq = math.lengthsq(spanXZ);
                     if (reach * reach > horizSq)
                     {
                         float maxVertical = math.sqrt(reach * reach - horizSq);
-                        float reachLimitNeckY = headPosWorld.y - maxVertical + P.LenTotal;
+                        float reachLimitNeckY = headPosWorld.y - maxVertical + (P.HipsRestDropY > 0f ? P.HipsRestDropY : P.LenTotal);
                         neckForHips.y = math.max(neckForHips.y, math.min(reachLimitNeckY, neckPosWorld.y));
                     }
                 }
 
-                ComputeHipsPosition(
-                    in neckForHips,
-                    in headPosWorld,
-                    in supportXZ,
-                    in worldUp,
-                    P.LenTotal,
-                    in torsoYawTarget,
-                    biasScale,
-                    in desiredHipsXZ,
-                    freeze,
-                    in tposeHips,
-                    P.StandingHipsLocalY,
-                    P.StandingHeadLocalY,
-                    P.TrackingLiftY,
-                    P.PostureModel != 0,
-                    P.HipsCompressionStrength,
-                    P.HipsMaxDropMeters,
-                    out float3 hipsPos);
+                ComputeHipsPosition( in neckForHips, in headPosWorld, in supportXZ, in solveUp, P.LenTotal, in torsoYawTarget, biasScale, in desiredHipsXZ, freeze, in tposeHips, P.StandingHipsLocalY, P.StandingHeadLocalY, P.TrackingLiftY, P.PostureModel != 0, P.HipsCompressionStrength, P.HipsMaxDropMeters, P.HipsRestDropY, out float3 hipsPos);
 
                 quaternion hipsRotTarget = freeze ? quaternion.identity : torsoYawTarget;
                 quaternion hipsCurrent = hips.OutgoingRotation;
@@ -318,12 +184,7 @@ namespace Basis.IK
                 else
                 {
                     quaternion chainTopYaw = freeze ? neckYaw : torsoYawTarget;
-                    ComputeChainPlacement(
-                        in neckPos, in hipsPosReadback,
-                        P.TChest, P.TSpine,
-                        in chainTopYaw, in hipsYaw,
-                        out float3 chestPos, out float3 spinePos,
-                        out quaternion chestYawTarget, out quaternion spineYawTarget);
+                    ComputeChainPlacement( in neckPos, in hipsPosReadback, P.TChest, P.TSpine, in chainTopYaw, in hipsYaw, out float3 chestPos, out float3 spinePos, out quaternion chestYawTarget, out quaternion spineYawTarget);
 
                     quaternion chestTarget = ApplyPitchRollCascadeBurst(in chestYawTarget, in eyeRot, P.ChestPitchFrac, P.ChestRollFrac);
                     quaternion spineTarget = ApplyPitchRollCascadeBurst(in spineYawTarget, in eyeRot, P.SpinePitchFrac, P.SpineRollFrac);
@@ -349,7 +210,6 @@ namespace Basis.IK
                 State[0] = s;
             }
         }
-
         [BurstCompile]
         private static void ApplyWorldAndLastBurst(ref BasisBoneSimState st, in float4x4 parentMatrix, in quaternion parentRotation)
         {
@@ -360,7 +220,6 @@ namespace Basis.IK
             st.OutgoingWorldPosition = p.xyz;
             st.OutgoingWorldRotation = math.mul(parentRotation, st.OutgoingRotation);
         }
-
         [BurstCompile]
         private static void ApplyPositionControlTorsoLock(ref BasisBoneSimState st, in quaternion targetRot, in float3 targetPos, in float3 scaledOffset, float tposeY, in float4x4 parentMatrix, in quaternion parentRotation)
         {
@@ -372,7 +231,6 @@ namespace Basis.IK
             st.OutgoingPosition = desired;
             ApplyWorldAndLastBurst(ref st, in parentMatrix, in parentRotation);
         }
-
         [BurstCompile]
         private static void ApplyPositionGivenBaseTorsoLock(ref BasisBoneSimState st, in float3 baseWorld, in float3 scaledOffset, float tposeY, in float4x4 parentMatrix, in quaternion parentRotation)
         {
@@ -385,7 +243,6 @@ namespace Basis.IK
             st.OutgoingPosition = desired;
             ApplyWorldAndLastBurst(ref st, in parentMatrix, in parentRotation);
         }
-
         private static quaternion ComputeTorsoYawTargetBurst(ref SpineSolveState s, in quaternion headYawOnly, float deadzoneDeg, float blendSpeed, bool moving, float dt)
         {
             YawDegrees(in headYawOnly, out float headYawDeg);
@@ -425,7 +282,6 @@ namespace Basis.IK
             quaternion anchorYaw = quaternion.AxisAngle(new float3(0f, 1f, 0f), math.radians(s.TorsoYawAnchorDeg));
             return math.slerp(anchorYaw, headYawOnly, s.TorsoFollow);
         }
-
         private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 headPosWorld, float dt, float standingHeadY, float headDrop, in quaternion torsoYaw, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked, out float3 supportXZ)
         {
             float3 headXZ = new float3(headPosWorld.x, 0f, headPosWorld.z);
@@ -449,10 +305,7 @@ namespace Basis.IK
 
             if (leftFootTracked && rightFootTracked)
             {
-                float3 feetMidXZ = new float3(
-                    (leftFootPos.x + rightFootPos.x) * 0.5f,
-                    0f,
-                    (leftFootPos.z + rightFootPos.z) * 0.5f);
+                float3 feetMidXZ = new float3( (leftFootPos.x + rightFootPos.x) * 0.5f, 0f, (leftFootPos.z + rightFootPos.z) * 0.5f);
                 supportXZ = feetMidXZ;
                 return math.lerp(feetMidXZ, headXZ, FootPendulumLeanFrac);
             }
@@ -464,11 +317,8 @@ namespace Basis.IK
             float3 right = math.mul(torsoYaw, new float3(1f, 0f, 0f));
             float devFwd = math.dot(dev, fwd);
             float devRight = math.dot(dev, right);
-            return s.HeadBaselineXZ
-                 + fwd * (devFwd * CounterbalanceFollowFrac)
-                 + right * (devRight * CounterbalanceLateralFollowFrac);
+            return s.HeadBaselineXZ + fwd * (devFwd * CounterbalanceFollowFrac) + right * (devRight * CounterbalanceLateralFollowFrac);
         }
-
         private static quaternion ApplyPitchRollCascadeBurst(in quaternion yawBase, in quaternion eyeRot, float pitchFrac, float rollFrac)
         {
             if (pitchFrac <= 0f && rollFrac <= 0f)
@@ -487,7 +337,6 @@ namespace Basis.IK
             quaternion swing = quaternion.EulerZXY(math.radians(new float3(pitchDeg * pitchFrac, 0f, rollDeg * rollFrac)));
             return math.mul(yawBase, swing);
         }
-
         private static float DeltaAngleDeg(float current, float target)
         {
             float delta = target - current;
@@ -495,13 +344,11 @@ namespace Basis.IK
             if (delta > 180f) delta -= 360f;
             return delta;
         }
-
         [BurstCompile]
         private static void SmoothSlerpBurst(in quaternion current, in quaternion target, float speed, float dt, out quaternion result)
         {
             result = math.slerp(current, target, BasisSmoothingProfiles.FramerateIndependentAlpha(speed, dt));
         }
-
         [BurstCompile]
         public static void ExtractYawBurst(in quaternion rotation, out quaternion result)
         {
@@ -515,43 +362,23 @@ namespace Basis.IK
             float inv = math.rsqrt(lenSq);
             result = new quaternion(0f, q.y * inv, 0f, q.w * inv);
         }
-
-        [BurstCompile]
-        private static void NormalizeSafeWithFallback(in float3 v, in float3 fallback, out float3 result)
-        {
-            result = math.lengthsq(v) < 1e-6f ? fallback : math.normalize(v);
-        }
-
         [BurstCompile]
         private static void ComposePosition(in float3 basePos, in quaternion rot, in float3 localOffset, out float3 result)
         {
             result = basePos + math.mul(rot, localOffset);
         }
-
         [BurstCompile]
-        internal static void ComputeHipsPosition(
-            in float3 neckPos,
-            in float3 headPos,
-            in float3 supportXZ,
-            in float3 worldUp,
-            float lenTotal,
-            in quaternion headYaw,
-            float biasScale,
-            in float3 desiredHipsXZ,
-            bool freezeToTpose,
-            in float3 tposeHips,
-            float standingHipsLocalY,
-            float standingHeadLocalY,
-            float trackingLiftY,
-            bool usePostureModel,
-            float compressionStrength,
-            float maxDrop,
-            out float3 result)
+        internal static void ComputeHipsPosition( in float3 neckPos, in float3 headPos, in float3 supportXZ, in float3 solveUp, float lenTotal, in quaternion headYaw, float biasScale, in float3 desiredHipsXZ, bool freezeToTpose, in float3 tposeHips, float standingHipsLocalY, float standingHeadLocalY, float trackingLiftY, bool usePostureModel, float compressionStrength, float maxDrop, out float3 result)
+        {
+            ComputeHipsPosition(in neckPos, in headPos, in supportXZ, in solveUp, lenTotal, in headYaw, biasScale, in desiredHipsXZ, freezeToTpose, in tposeHips, standingHipsLocalY, standingHeadLocalY, trackingLiftY, usePostureModel, compressionStrength, maxDrop, 0f, out result);
+        }
+        [BurstCompile]
+        internal static void ComputeHipsPosition( in float3 neckPos, in float3 headPos, in float3 supportXZ, in float3 solveUp, float lenTotal, in quaternion headYaw, float biasScale, in float3 desiredHipsXZ, bool freezeToTpose, in float3 tposeHips, float standingHipsLocalY, float standingHeadLocalY, float trackingLiftY, bool usePostureModel, float compressionStrength, float maxDrop, float restDropY, out float3 result)
         {
             float standingHipsY = standingHipsLocalY + trackingLiftY;
             float standingHeadY = standingHeadLocalY + trackingLiftY;
 
-            float3 hipsBase = freezeToTpose ? tposeHips + new float3(0f, trackingLiftY, 0f) : neckPos - worldUp * lenTotal;
+            float3 hipsBase = freezeToTpose ? tposeHips + new float3(0f, trackingLiftY, 0f) : neckPos - solveUp * (restDropY > 0f ? restDropY : lenTotal);
             quaternion biasYaw = freezeToTpose ? quaternion.identity : headYaw;
             float3 forwardBias = math.mul(biasYaw, new float3(0f, 0f, 1f)) * biasScale;
 
@@ -588,26 +415,14 @@ namespace Basis.IK
 
             result = new float3(desiredHipsXZ.x, hipsBase.y, desiredHipsXZ.z) + forwardBias;
         }
-
         [BurstCompile]
-        internal static void ComputeChainPlacement(
-            in float3 neckPos,
-            in float3 hipsPos,
-            float tChest,
-            float tSpine,
-            in quaternion neckYaw,
-            in quaternion hipsYaw,
-            out float3 chestPos,
-            out float3 spinePos,
-            out quaternion chestYawTarget,
-            out quaternion spineYawTarget)
+        internal static void ComputeChainPlacement( in float3 neckPos, in float3 hipsPos, float tChest, float tSpine, in quaternion neckYaw, in quaternion hipsYaw, out float3 chestPos, out float3 spinePos, out quaternion chestYawTarget, out quaternion spineYawTarget)
         {
             chestPos = math.lerp(neckPos, hipsPos, tChest);
             spinePos = math.lerp(neckPos, hipsPos, tSpine);
             chestYawTarget = math.slerp(neckYaw, hipsYaw, tChest);
             spineYawTarget = math.slerp(neckYaw, hipsYaw, tSpine);
         }
-
         [BurstCompile]
         public static void YawDegrees(in quaternion yawOnly, out float result)
         {

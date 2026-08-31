@@ -19,6 +19,7 @@ public class SMModuleDebugOptions : BasisSettingsBase
     public static bool UseTrackerGizmos = false;
     public static bool UseLinkedTrackerLines = false;
     public static bool UseEyeGazeGizmo = false;
+    public static bool UseAvatarProxyGizmo = false;
     public static bool UseIKColliders = false;
     public static bool UseHintOffsets = false;
     public static bool UseFootPlacement = false;
@@ -48,6 +49,7 @@ public class SMModuleDebugOptions : BasisSettingsBase
     private static string K_TRACKER_GIZMOS => BasisSettingsDefaults.TrackerGizmos.BindingKey;                  // "trackergizmos"
     private static string K_LINKED_TRACKER_LINES => BasisSettingsDefaults.LinkedTrackerLines.BindingKey;      // "linkedtrackerlines"
     private static string K_GIZMO_EYE_GAZE => BasisSettingsDefaults.GizmoEyeGaze.BindingKey;                  // "gizmoeyegaze"
+    private static string K_GIZMO_AVATAR_PROXY => BasisSettingsDefaults.GizmoAvatarProxy.BindingKey;          // "gizmoavatarproxy"
     private static string K_GIZMO_IK_COLLIDERS => BasisSettingsDefaults.GizmoIKColliders.BindingKey;          // "gizmoikcolliders"
     private static string K_GIZMO_AUDIO_RANGES => BasisSettingsDefaults.GizmoAudioRanges.BindingKey;          // "gizmoaudioranges"
     private static string K_GIZMO_AUDIO_CONE => BasisSettingsDefaults.GizmoAudioListenerCone.BindingKey;      // "gizmoaudiolistenercone"
@@ -106,6 +108,57 @@ public class SMModuleDebugOptions : BasisSettingsBase
         // the manager's destroy pass clears every entry in BasisGizmoManager.Gizmos.
         BasisGizmoManager.OnUseGizmosChanged += OnUseGizmosChanged;
         HookSolveGizmoStages();
+        HookGizmoDrawOnTop();
+        HookGizmoRenderInAllCameras();
+    }
+
+    // Driven off the binding rather than ValidSettingsChange so the current value lands on the
+    // manager at startup too — the settings file is read after this Awake on a cold boot, and
+    // the reload notifies through the same event.
+    private Action<bool> _gizmoDrawOnTopChanged;
+
+    private void HookGizmoDrawOnTop()
+    {
+        if (_gizmoDrawOnTopChanged != null)
+        {
+            return;
+        }
+        _gizmoDrawOnTopChanged = value => BasisGizmoManager.DrawOnTop = value;
+        BasisSettingsDefaults.GizmoDrawOnTop.OnChanged += _gizmoDrawOnTopChanged;
+        BasisGizmoManager.DrawOnTop = BasisSettingsDefaults.GizmoDrawOnTop.RawValue;
+    }
+
+    private void UnhookGizmoDrawOnTop()
+    {
+        if (_gizmoDrawOnTopChanged == null)
+        {
+            return;
+        }
+        BasisSettingsDefaults.GizmoDrawOnTop.OnChanged -= _gizmoDrawOnTopChanged;
+        _gizmoDrawOnTopChanged = null;
+    }
+
+    private Action<bool> _gizmoRenderInAllCamerasChanged;
+
+    private void HookGizmoRenderInAllCameras()
+    {
+        if (_gizmoRenderInAllCamerasChanged != null)
+        {
+            return;
+        }
+        _gizmoRenderInAllCamerasChanged = value => BasisGizmoManager.RenderInAllCameras = value;
+        BasisSettingsDefaults.GizmoRenderInAllCameras.OnChanged += _gizmoRenderInAllCamerasChanged;
+        BasisGizmoManager.RenderInAllCameras = BasisSettingsDefaults.GizmoRenderInAllCameras.RawValue;
+    }
+
+    private void UnhookGizmoRenderInAllCameras()
+    {
+        if (_gizmoRenderInAllCamerasChanged == null)
+        {
+            return;
+        }
+        BasisSettingsDefaults.GizmoRenderInAllCameras.OnChanged -= _gizmoRenderInAllCamerasChanged;
+        _gizmoRenderInAllCamerasChanged = null;
     }
 
     // The IK solve gizmo toggles are generated from BasisIKSolveGizmoStages rather than declared
@@ -113,7 +166,7 @@ public class SMModuleDebugOptions : BasisSettingsBase
     // Subscribing to the bindings keeps them feeding the derived render gate all the same.
     private Action<bool> _solveGizmoStageChanged;
 
-    private void HookSolveGizmoStages()
+    private void HookSolveGizmoStages() 
     {
         if (_solveGizmoStageChanged != null)
         {
@@ -150,6 +203,8 @@ public class SMModuleDebugOptions : BasisSettingsBase
         }
         BasisGizmoManager.OnUseGizmosChanged -= OnUseGizmosChanged;
         UnhookSolveGizmoStages();
+        UnhookGizmoDrawOnTop();
+        UnhookGizmoRenderInAllCameras();
         ClearTrackerGizmos();
         ClearLinkLines();
         BasisAudioGizmos.Shutdown();
@@ -223,6 +278,14 @@ public class SMModuleDebugOptions : BasisSettingsBase
         if (matchedSettingName == K_LINKED_TRACKER_LINES)
         {
             HandleLinkedTrackerLines(optionValue);
+            RecomputeUseGizmos();
+            return;
+        }
+
+        if (matchedSettingName == K_GIZMO_AVATAR_PROXY)
+        {
+            bool.TryParse(optionValue, out UseAvatarProxyGizmo);
+            BasisAvatarProxyGizmo.SetEnabled(UseAvatarProxyGizmo);
             RecomputeUseGizmos();
             return;
         }
@@ -432,6 +495,7 @@ public class SMModuleDebugOptions : BasisSettingsBase
             UseTrackerGizmos ||
             UseLinkedTrackerLines ||
             UseEyeGazeGizmo ||
+            UseAvatarProxyGizmo ||
             UseIKColliders ||
             BasisIKSolveGizmoStages.Active ||
             BasisPointerRayGizmos.Show ||
@@ -591,7 +655,14 @@ public class SMModuleDebugOptions : BasisSettingsBase
         {
             BasisLocalPlayer player = BasisLocalPlayer.Instance;
             bool ikReady = player != null && player.LocalRigDriver != null && player.LocalRigDriver.IKDataReady;
-            BasisIKColliderGizmo.Tick(ikReady, ikReady ? player.LocalRigDriver.basisTransformMapping : null, ikReady ? player.LocalRigDriver.IKJob : default, UseGizmoLabels, _camPos);
+            if (ikReady)
+            {
+                BasisIKColliderGizmo.Tick(true, player.LocalRigDriver.basisTransformMapping, in player.LocalRigDriver.IKJob, UseGizmoLabels, _camPos);
+            }
+            else
+            {
+                BasisIKColliderGizmo.Hide();
+            }
         }
 
         BasisHintOffsetGizmos.Tick(UseHintOffsets, UseGizmoLabels, _camPos);
@@ -615,11 +686,6 @@ public class SMModuleDebugOptions : BasisSettingsBase
         BasisNetworkOverviewGizmos.Tick(scale);
     }
 
-    /// <summary>
-    /// Lazily creates / updates a billboarded text label keyed by <paramref name="key"/>.
-    /// Shared by tracker and link labels; the gizmo diffs text/colour internally so a
-    /// steady label costs only the billboard transform write.
-    /// </summary>
     private static void UpdateLabel<T>(Dictionary<T, int> map, T key, string gizmoName, string text, Vector3 position, Color color, float scale)
     {
         Quaternion rot = BasisGizmoManager.BillboardRotation(position, _camPos);

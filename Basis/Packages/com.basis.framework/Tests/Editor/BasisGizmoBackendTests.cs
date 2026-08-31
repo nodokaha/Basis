@@ -271,6 +271,60 @@ namespace Basis.Tests.IK
         }
 
         [Test]
+        public void RenderInAllCameras_MovesTheSharedLayerToTheOneEveryCameraRenders()
+        {
+            // Off, gizmos ride OverlayUI, which the handheld camera culls out of its shots.
+            // On, they move to Default — the layer the world itself is on — so a capture,
+            // a mirror or any other camera in the scene draws them like the player's view does.
+            bool original = BasisGizmoManager.RenderInAllCameras;
+            int originalLayer = BasisGizmoManager.RenderLayer;
+            try
+            {
+                BasisGizmoManager.RenderInAllCameras = false;
+                BasisGizmoManager.RenderLayer = BasisGizmoManager.DefaultRenderLayer;
+                int overlay = LayerMask.NameToLayer("OverlayUI");
+                Assume.That(overlay, Is.GreaterThanOrEqualTo(0), "This project no longer defines the OverlayUI layer.");
+                Assert.AreEqual(overlay, BasisGizmoManager.RenderLayer);
+
+                BasisGizmoManager.RenderInAllCameras = true;
+                Assert.AreEqual(0, BasisGizmoManager.DefaultRenderLayer, "Default is the layer every camera renders.");
+                Assert.AreEqual(0, BasisGizmoManager.RenderLayer, "The shared layer follows the toggle.");
+
+                BasisGizmoManager.RenderInAllCameras = false;
+                Assert.AreEqual(overlay, BasisGizmoManager.RenderLayer, "and goes back when it is turned off.");
+            }
+            finally
+            {
+                BasisGizmoManager.RenderInAllCameras = original;
+                BasisGizmoManager.RenderLayer = originalLayer;
+            }
+        }
+
+        [Test]
+        public void RenderInAllCameras_LeavesALayerSomethingElseChose()
+        {
+            // The calibration mirror relay parks RenderLayer on LocalPlayerAvatar while its
+            // cutout mirror is alive and restores DefaultRenderLayer afterwards. Toggling
+            // underneath it must not yank the gizmos out of the reflection.
+            bool original = BasisGizmoManager.RenderInAllCameras;
+            int originalLayer = BasisGizmoManager.RenderLayer;
+            try
+            {
+                BasisGizmoManager.RenderInAllCameras = false;
+                BasisGizmoManager.RenderLayer = 9;
+
+                BasisGizmoManager.RenderInAllCameras = true;
+                Assert.AreEqual(9, BasisGizmoManager.RenderLayer, "an explicit layer outranks the toggle");
+                Assert.AreEqual(0, BasisGizmoManager.DefaultRenderLayer, "which the restore then picks up");
+            }
+            finally
+            {
+                BasisGizmoManager.RenderInAllCameras = original;
+                BasisGizmoManager.RenderLayer = originalLayer;
+            }
+        }
+
+        [Test]
         public void SetGizmoActive_TogglesWithoutDestroying()
         {
             BasisGizmoManager.CreateSphereGizmo("s", out int sphereId, Vector3.zero, 0.1f, Color.white);
@@ -312,6 +366,49 @@ namespace Basis.Tests.IK
             Assert.AreNotEqual(first, second);
             Assert.IsFalse(BasisGizmoManager.Exists(first));
             Assert.IsTrue(BasisGizmoManager.Exists(second));
+        }
+
+        // ── Draw-on-top / depth-test mode ───────────────────────────────────
+
+        [Test]
+        public void GizmoShaders_ExposeTheDepthTestProperty()
+        {
+            // ZTest is driven per-material off _ZTest — a shader that lost the property
+            // would silently pin every gizmo to whatever state it hardcoded instead.
+            foreach (string shaderName in new[] { "BasisGizmoSphereInstanced", "BasisGizmoLine" })
+            {
+                Shader shader = Resources.Load<Shader>(shaderName);
+                Assert.IsNotNull(shader, $"{shaderName} missing from Resources");
+                Material material = new Material(shader);
+                Assert.IsTrue(material.HasProperty("_ZTest"), $"{shaderName} has no _ZTest property");
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void DrawOnTop_DrivesMaterialDepthStateBothWays()
+        {
+            Shader shader = Resources.Load<Shader>("BasisGizmoSphereInstanced");
+            Assert.IsNotNull(shader);
+            Material material = new Material(shader);
+            bool original = BasisGizmoManager.DrawOnTop;
+            try
+            {
+                BasisGizmoManager.DrawOnTop = false;
+                BasisGizmoManager.ApplyMaterialDepthMode(material);
+                Assert.AreEqual((int)CompareFunction.LessEqual, (int)material.GetFloat("_ZTest"));
+                Assert.AreEqual((int)RenderQueue.Transparent, material.renderQueue);
+
+                BasisGizmoManager.DrawOnTop = true;
+                BasisGizmoManager.ApplyMaterialDepthMode(material);
+                Assert.AreEqual((int)CompareFunction.Always, (int)material.GetFloat("_ZTest"));
+                Assert.AreEqual((int)RenderQueue.Overlay, material.renderQueue);
+            }
+            finally
+            {
+                BasisGizmoManager.DrawOnTop = original;
+                Object.DestroyImmediate(material);
+            }
         }
 
         // ── Label color diffing ─────────────────────────────────────────────

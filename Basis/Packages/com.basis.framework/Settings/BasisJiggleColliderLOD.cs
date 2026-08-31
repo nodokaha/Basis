@@ -2,21 +2,6 @@ using Basis.BasisUI;
 using Basis.Scripts.Networking;
 using UnityEngine;
 
-/// <summary>
-/// Detail level for a remote avatar's jiggle-collision colliders, selected by distance.
-/// Each tier is a strict subset of the previous one.
-/// </summary>
-public enum BasisJiggleColliderTier
-{
-    /// <summary>Feet + arms + hand spheres + fingers (every authored collider).</summary>
-    Full = 0,
-    /// <summary>Drop the per-finger colliders; keep feet, arms and the hand spheres.</summary>
-    NoFingers = 1,
-    /// <summary>Hand spheres only — arm and foot colliders removed.</summary>
-    HandsOnly = 2,
-    /// <summary>No jiggle colliders at all.</summary>
-    None = 3,
-}
 
 /// <summary>
 /// Distance-based reduction of the per-avatar jiggle colliders other players contribute to the
@@ -30,13 +15,15 @@ public static class BasisJiggleColliderLOD
     /// <summary>Master switch. When false, every avatar keeps its full collider set.</summary>
     public static bool Enabled;
 
-    private static float _nearSqr = 25f * 25f;
-    private static float _midSqr = 50f * 50f;
-    private static float _farSqr = 100f * 100f;
+    // internal: also read by BasisJiggleLodJob, which mirrors ComputeTier's math to run in
+    // parallel with the transmit tick's distance/reduce/cap/dampen chain (see that job's summary).
+    internal static float _nearSqr = 25f * 25f;
+    internal static float _midSqr = 50f * 50f;
+    internal static float _farSqr = 100f * 100f;
 
     // 10% distance hysteresis (matches the squared convention used by the distance-reduction jobs)
     // so an avatar hovering on a boundary doesn't churn add/remove every tick.
-    private const float HysteresisSqr = 1.1f * 1.1f;
+    internal const float HysteresisSqr = 1.1f * 1.1f;
 
     // [feet, arms, hands, fingers] active per tier. Static so tier lookups never allocate.
     private static readonly bool[] FullCats = { true, true, true, true };

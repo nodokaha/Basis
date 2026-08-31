@@ -273,6 +273,17 @@ namespace Basis.Scripts.Drivers
         /// </remarks>
         public void AddJiggleRigColliders(BasisTransformMapping Mapping, bool allowColliderLOD = false)
         {
+#if UNITY_SERVER
+            // Headless never simulates jiggle (BasisAvatarFactory.StoreJiggleRigs destroys the
+            // rigs on load), so registering per-avatar capsules would only grow JiggleMemoryBus
+            // collider capacity for a bus that has no trees to collide with. Leaving
+            // HasJiggleColliders false keeps RemoveJiggleRigColliders and the distance LOD
+            // no-ops for the rest of this avatar's life.
+            _jiggleColliderMapping = default;
+            _fingersBuilt = false;
+            HasJiggleColliders = false;
+            return;
+#else
             _jiggleColliderMapping = Mapping;
             _fingersBuilt = false;
             RefreshColliderScaleRebase(Mapping.HasAnimatorRoot ? Mapping.AnimatorRoot : null);
@@ -324,6 +335,7 @@ namespace Basis.Scripts.Drivers
             // Batch-add the full set at once to avoid O(n²) dedup in JiggleMemoryBus. The distance
             // LOD pass (BasisTransmissionResults) trims remote avatars back down afterward.
             JigglePhysics.AddJiggleColliders(JiggleColliders);
+#endif
         }
 
         private void BuildFingerColliders(BasisTransformMapping Mapping)
@@ -682,13 +694,6 @@ namespace Basis.Scripts.Drivers
                 r.gameObject.layer = layer;
             }
         }
-        private struct BasisShadowCloneEntry
-        {
-            public SkinnedMeshRenderer Source;
-            public SkinnedMeshRenderer Clone;
-            public int BlendShapeCount;
-            public float[] Values;
-        }
         private static List<BasisShadowCloneBlendshapeSync> ShadowCloneSyncs = new();
         public static void RemoveOldShadowClones()
         {
@@ -755,7 +760,6 @@ namespace Basis.Scripts.Drivers
                 ShadowCloneSyncs.Add(new BasisShadowCloneBlendshapeSync(source, LocalShadowClone, blendShapeCount));
             }
         }
-        public static bool hasBlendShapeJobScheduled = false;
         public static unsafe void ScheduleReadBlendShapes(float epsilon = 0.001f)
         {
             for (int s = 0; s < ShadowCloneSyncs.Count; s++)
@@ -766,11 +770,14 @@ namespace Basis.Scripts.Drivers
                 {
                     continue;
                 }
-                if (hasBlendShapeJobScheduled)
-                {
-                    sync.Handle.Complete();
-                    hasBlendShapeJobScheduled = false;
-                }
+                // Complete THIS sync's own handle (last frame's job, or the never-scheduled default
+                // on the very first call — JobHandle.Complete() is a safe no-op on both) before
+                // reusing its buffers. A shared static flag used to gate this instead of a per-sync
+                // check — harmless with today's single shadow-clone entry, but the moment a second
+                // entry existed it would complete/skip the wrong sync's handle and read a job's
+                // buffers mid-flight (ApplyShadowCloneBlendShapes reads ChangedMask/Previous via the
+                // unsafe accessor, so the job-safety system would not have caught it either).
+                sync.Handle.Complete();
                 int count = sync.Count;
 
                 float* pCurrent = (float*)sync.Current.GetUnsafePtr();
@@ -791,8 +798,14 @@ namespace Basis.Scripts.Drivers
 
                 // Batch size can be tuned; 32 is a decent start
                 sync.Handle = job.Schedule(count, 32);
-                hasBlendShapeJobScheduled = true;
             }
+            // Self-sufficient kick: the driver currently calls BasisAuthoredMotionSystem.Schedule()
+            // immediately after this (which flushes its own job via the same API), so this job has
+            // always started by the time ApplyShadowCloneBlendShapes joins it later in LateUpdate —
+            // but that overlap was incidental to caller ordering, not guaranteed by this function on
+            // its own. Matches the standing rule: a schedule without a kick at schedule time is not
+            // actually overlapping anything, it just happens not to matter yet.
+            JobHandle.ScheduleBatchedJobs();
         }
         public static unsafe void ApplyShadowCloneBlendShapes()
         {
@@ -805,11 +818,10 @@ namespace Basis.Scripts.Drivers
                 {
                     continue;
                 }
-                if (hasBlendShapeJobScheduled)
-                {
-                    sync.Handle.Complete();
-                    hasBlendShapeJobScheduled = false;
-                }
+                // This sync's own handle — the job ScheduleReadBlendShapes just scheduled for it
+                // earlier this frame. See the comment there: a shared flag used to gate this instead
+                // of a per-sync Complete(), which breaks the moment a second entry exists.
+                sync.Handle.Complete();
 
                 int count = sync.Count;
                 var clone = sync.Clone;

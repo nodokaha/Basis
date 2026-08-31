@@ -6,212 +6,168 @@ namespace Basis.IK
 {
     public partial struct BasisEerieMovement
     {
-        void SolveLegPass(BasisPoseStream stream)
+        void SolveLegPass()
         {
-            SolveLegs(stream, enabledLeftLowerLeg, handleLeftUpperLeg, handleLeftLowerLeg, handleLeftFoot, targetPositionLeftLowerLeg, targetRotationLeftLowerLeg, hintPositionLeftLowerLeg, hintRotationLeftLowerLeg, hintWeightLeftLowerLeg, targetOffsetLeftFoot, kneeBendPrefLeft, hintIsTrackerLeftLowerLeg, footIsTrackerLeftLeg, 0);
-            SolveLegs(stream, enabledRightLowerLeg, handleRightUpperLeg, handleRightLowerLeg, handleRightFoot, targetPositionRightLowerLeg, targetRotationRightLowerLeg, hintPositionRightLowerLeg, hintRotationRightLowerLeg, hintWeightRightLowerLeg, targetOffsetRightFoot, kneeBendPrefRight, hintIsTrackerRightLowerLeg, footIsTrackerRightLeg, 1);
+            SolveLeg(0);
+            SolveLeg(1);
         }
-
-        void SolveToePass(BasisPoseStream stream)
+        void SolveToePass()
         {
-            if (leftToeEnabled) ApplyRotation(stream, true, handleLeftToe, leftDrivenTargetRot, targetOffsetLeftToe);
-            else ApplyToeSurfaceBend(stream, handleLeftToe, leftToeBendDeg, leftToeBendAxis);
+            if (plan.leftToeDriven) poseStream.SetRotation(handleLeftToe, leftDrivenTargetRot * offsetRotationLeftToe);
+            else if (plan.leftToeSurface) ApplyToeSurfaceBend(handleLeftToe, leftToeBendDeg, leftToeBendAxis);
 
-            if (rightToeEnabled) ApplyRotation(stream, true, handleRightToe, rightDrivenTargetRot, targetOffsetRightToe);
-            else ApplyToeSurfaceBend(stream, handleRightToe, rightToeBendDeg, rightToeBendAxis);
+            if (plan.rightToeDriven) poseStream.SetRotation(handleRightToe, rightDrivenTargetRot * offsetRotationRightToe);
+            else if (plan.rightToeSurface) ApplyToeSurfaceBend(handleRightToe, rightToeBendDeg, rightToeBendAxis);
         }
-
-        BasisSwivelFrame BuildLegFrame(BasisPoseStream stream)
+        BasisSwivelFrame BuildLegFrame()
         {
-            if (!handleLeftUpperLeg.IsValid(stream) || !handleRightUpperLeg.IsValid(stream)
-                || !handleHips.IsValid(stream))
+            if (!plan.hasLegFrame)
             {
                 return default;
             }
 
-            BasisBoneHandle upTo = handleChest.IsValid(stream) ? handleChest
-                : handleSpine.IsValid(stream) ? handleSpine
-                : handleNeck.IsValid(stream) ? handleNeck : handleHead;
-            if (!upTo.IsValid(stream))
+            return BasisSwivelHintCore.BuildFrame( poseStream.GetPosition(handleLeftUpperLeg), poseStream.GetPosition(handleRightUpperLeg), poseStream.GetPosition(handleHips), poseStream.GetPosition(plan.legFrameTo));
+        }
+        public void SolveLeg(int legSlot)
+        {
+            bool isLeft = legSlot == 0;
+            BasisEerieLegPlan leg = isLeft ? plan.leftLeg : plan.rightLeg;
+            if (!leg.solve)
             {
-                return default;
+                return;
             }
 
-            return BasisSwivelHintCore.BuildFrame(
-                handleLeftUpperLeg.GetPosition(stream), handleRightUpperLeg.GetPosition(stream),
-                handleHips.GetPosition(stream), upTo.GetPosition(stream));
-        }
+            float posWeight = leg.weight;
+            BasisBoneHandle root = isLeft ? handleLeftUpperLeg : handleRightUpperLeg;
+            BasisBoneHandle mid = isLeft ? handleLeftLowerLeg : handleRightLowerLeg;
+            BasisBoneHandle tip = isLeft ? handleLeftFoot : handleRightFoot;
+            Vector3 hint = isLeft ? hintPositionLeftLowerLeg : hintPositionRightLowerLeg;
+            Quaternion hintRot = isLeft ? hintRotationLeftLowerLeg : hintRotationRightLowerLeg;
+            float hintW = leg.hintWeight;
+            Quaternion targetOffset = isLeft ? offsetRotationLeftFoot : offsetRotationRightFoot;
+            Vector3 bendNormal = isLeft ? kneeBendPrefLeft : kneeBendPrefRight;
+            bool hintIsTracker = leg.kneeTracked, footIsTracker = leg.tracked;
+            Quaternion origRootRot = poseStream.GetRotation(root), origMidRot = poseStream.GetRotation(mid);
+            Quaternion origTipRot = poseStream.GetRotation(tip);
+            ResetToRest(root, mid, tip);
+            Quaternion tRot = isLeft ? targetRotationLeftLowerLeg : targetRotationRightLowerLeg;
+            bool preserveTip = leg.preserveTip;
+            if (preserveTip) tRot = origTipRot;
 
-        public Quaternion SolveTwoBone(BasisPoseStream stream, BasisBoneHandle root, BasisBoneHandle mid, BasisBoneHandle tip, BasisAffineTransform target, Vector3 hint, float hintWeight, Quaternion targetOffset, Vector3 BendNormal, float hintDistrust = 0f, int diagSlot = -1, Quaternion hintRotation = default, bool hintIsTracker = false, Vector3 anteriorNormal = default)
-        {
+            Vector3 targetPos = isLeft ? targetPositionLeftLowerLeg : targetPositionRightLowerLeg, modelHint = default;
+            float hintDistrust = 0f, conf = 0f;
+            bool usedModelHint = leg.modelHint && BasisLegHintCore.Solve(BuildLegFrame(), poseStream.GetPosition(root), poseStream.GetPosition(mid), poseStream.GetPosition(tip), targetPos, isLeft, out modelHint, out conf, out hintDistrust);
+            if (usedModelHint)
+            {
+                hint = modelHint;
+                hintW = 1f;
+                if (plan.hasLegDiagnostics)
+                {
+                    ref BasisLegDiagnostics d = ref Ref(legDiagnostics, legSlot);
+                    d.ModelHintUsed = 1f;
+                    d.ModelConfidence = conf;
+                }
+            }
+
             BasisLegSolveInput input = default;
-            root.GetPositionAndRotation(stream, out Vector3 rootPos, out Quaternion rootRot);
-            mid.GetPositionAndRotation(stream, out Vector3 midPos, out Quaternion midRot);
+            poseStream.GetPositionAndRotation(root, out Vector3 rootPos, out Quaternion rootRot);
+            poseStream.GetPositionAndRotation(mid, out Vector3 midPos, out Quaternion midRot);
             input.Root = rootPos;
             input.Mid = midPos;
-            input.Tip = tip.GetPosition(stream);
+            input.Tip = poseStream.GetPosition(tip);
             input.RootRotation = rootRot;
             input.MidRotation = midRot;
-            input.TargetPosition = target.translation;
-            input.TargetRotation = target.rotation;
+            input.TargetPosition = targetPos;
+            input.TargetRotation = tRot;
             input.HintPosition = hint;
-            input.HintWeight = hintWeight;
+            input.HintWeight = hintW;
             input.HintDistrust = hintDistrust;
             input.TargetOffset = targetOffset;
-            input.BendNormal = BendNormal;
-
-            input.AnteriorNormal = anteriorNormal;
-            input.HintRotation = hintRotation;
+            input.BendNormal = bendNormal;
+            input.AnteriorNormal = kneeAnteriorRef;
+            input.HintRotation = hintRot;
+            input.HasHintRotation = leg.hintRoll;
             input.HintIsTracker = hintIsTracker;
 
             BasisLegSolveCore.Solve(input, out BasisLegSolveResult result);
 
-            if (diagSlot >= 0 && legDiagnostics.IsCreated && diagSlot < legDiagnostics.Length)
+            if (plan.hasLegDiagnostics)
             {
-                BasisLegDiagnostics d = legDiagnostics[diagSlot];
+                ref BasisLegDiagnostics d = ref Ref(legDiagnostics, legSlot);
                 d.ReachRatio = result.ReachRatio;
                 d.KneeAngleDeg = result.KneeAngleDeg;
                 d.AxisSource = result.AxisSource;
                 d.HintApplied = result.HintApplied ? 1f : 0f;
                 d.HintDistrust = hintDistrust;
                 d.ShinRollDeg = result.ShinRollDeg;
-                legDiagnostics[diagSlot] = d;
             }
 
-            mid.SetRotation(stream, result.MidDelta * mid.GetRotation(stream));
-            root.SetRotation(stream, result.RootDelta * root.GetRotation(stream));
-            root.SetRotation(stream, result.HintDelta * root.GetRotation(stream));
-            mid.SetRotation(stream, result.MidPostRoll * mid.GetRotation(stream));
-            tip.SetRotation(stream, result.TipRotation);
-            return result.MidPostRoll;
-        }
-        public void SolveLegs(BasisPoseStream stream, float enabledProp, BasisBoneHandle root, BasisBoneHandle mid, BasisBoneHandle tip, Vector3 targetPosProp, Quaternion targetRotProp, Vector3 hintPosProp, Quaternion hintRotProp, float hintWeightProp, Quaternion targetOffset, Vector3 bendNormalProp, bool hintIsTrackerProp, bool footIsTrackerProp, int legSlot)
-        {
-            float posWeight = enabledProp;
-            if (posWeight <= 0f)
-            {
-                return;
-            }
+            poseStream.SetRotation(mid, result.MidDelta * poseStream.GetRotation(mid));
+            poseStream.SetRotation(root, result.RootDelta * poseStream.GetRotation(root));
+            poseStream.SetRotation(root, result.HintDelta * poseStream.GetRotation(root));
+            poseStream.SetRotation(mid, result.MidPostRoll * poseStream.GetRotation(mid));
+            poseStream.SetRotation(tip, result.TipRotation);
+            Quaternion shinRoll = result.MidPostRoll;
 
-            if (!(root.IsValid(stream) && mid.IsValid(stream) && tip.IsValid(stream)))
-            {
-                return;
-            }
-            Quaternion origRootRot = root.GetRotation(stream);
-            Quaternion origMidRot = mid.GetRotation(stream);
-            Quaternion origTipRot = tip.GetRotation(stream);
-
-            Quaternion tRot = targetRotProp;
-            float tRotSqrLen = tRot.x * tRot.x + tRot.y * tRot.y + tRot.z * tRot.z + tRot.w * tRot.w;
-            bool preserveTip = !(tRotSqrLen > 0.5f);
-            if (preserveTip) tRot = origTipRot;
-            float hintW = hintWeightProp;
-
-            BasisAffineTransform target = new BasisAffineTransform(targetPosProp, tRot);
-            Vector3 hint = hintPosProp;
-            Vector3 bendNormal = bendNormalProp;
-
-            float hintDistrust = 0f;
-            bool usedModelHint = false;
-            bool fabricatedLeg = !hintIsTrackerProp && !footIsTrackerProp;
-            if (!(hintW > 0f) || fabricatedLeg)
-            {
-                BasisSwivelFrame frame = BuildLegFrame(stream);
-
-                Vector3 hipPos = root.GetPosition(stream);
-                float upperLen = (mid.GetPosition(stream) - hipPos).magnitude;
-                float lowerLen = (tip.GetPosition(stream) - mid.GetPosition(stream)).magnitude;
-                float legLen = upperLen + lowerLen;
-                bool isLeft = legSlot == 0;
-                if (BasisSwivelHintCore.LegHint(frame, hipPos, target.translation, legLen, isLeft,
-                                                out Vector3 modelHint, out float conf, useNeuralPole))
-                {
-                    hint = modelHint;
-                    hintW = 1f;
-                    usedModelHint = true;
-                    if (legDiagnostics.IsCreated && legSlot < legDiagnostics.Length)
-                    {
-                        BasisLegDiagnostics d = legDiagnostics[legSlot];
-                        d.ModelHintUsed = 1f;
-                        d.ModelConfidence = conf;
-                        legDiagnostics[legSlot] = d;
-                    }
-                    hintDistrust = 1f - BasisSwivelHintCore.LegModelTrust(conf);
-                }
-            }
-            Quaternion shinRoll = SolveTwoBone(stream, root, mid, tip, target, hint, hintW, targetOffset, bendNormal, hintDistrust, legSlot,hintIsTrackerProp ? hintRotProp : default, hintIsTrackerProp, kneeAnteriorRef);
             if (posWeight < 1f)
             {
-                root.SetRotation(stream, Quaternion.Slerp(origRootRot, root.GetRotation(stream), posWeight));
-                mid.SetRotation(stream, Quaternion.Slerp(origMidRot, mid.GetRotation(stream), posWeight));
-                tip.SetRotation(stream, Quaternion.Slerp(origTipRot, tip.GetRotation(stream), posWeight));
+                poseStream.SetRotation(root, Quaternion.Slerp(origRootRot, poseStream.GetRotation(root), posWeight));
+                poseStream.SetRotation(mid, Quaternion.Slerp(origMidRot, poseStream.GetRotation(mid), posWeight));
+                poseStream.SetRotation(tip, Quaternion.Slerp(origTipRot, poseStream.GetRotation(tip), posWeight));
             }
             if (preserveTip)
             {
                 Quaternion carriedTip = shinRoll * origTipRot;
-                tip.SetRotation(stream, posWeight < 1f ? Quaternion.Slerp(origTipRot, carriedTip, posWeight) : carriedTip);
+                poseStream.SetRotation(tip, posWeight < 1f ? Quaternion.Slerp(origTipRot, carriedTip, posWeight) : carriedTip);
             }
 
-            RecordHipDiagnostics(stream, root, mid, legSlot);
-            if (legSwivelSmoothing)
+            RecordHipDiagnostics(root, mid, legSlot);
+            if (leg.swivel)
             {
-                if (hintIsTrackerProp || footIsTrackerProp)
+                if (leg.swivelTracked)
                 {
-                    bool footDerivedPole = !hintIsTrackerProp && footIsTrackerProp && !usedModelHint;
-                    SmoothKneeSwivel(stream, root, mid, tip, legSlot, stream.deltaTime,
-                        trackedKneeSwivelMinCutoffHz, trackedKneeSwivelBeta, trackedKneeSwivelDerivCutoffHz,
-                        conditionOnPole: !hintIsTrackerProp && (!footDerivedPole || kneeFootPoleConditioning),
-                        holdWhenSingular: !footDerivedPole || kneeFootPoleHold);
+                    bool footDerivedPole = !hintIsTracker && footIsTracker && !usedModelHint;
+                    SmoothKneeSwivel(root, mid, tip, legSlot, trackedKneeSwivelMinCutoffHz, trackedKneeSwivelBeta, trackedKneeSwivelDerivCutoffHz, conditionOnPole: !hintIsTracker && (!footDerivedPole || kneeFootPoleConditioning), holdWhenSingular: !footDerivedPole || kneeFootPoleHold);
                 }
                 else
                 {
-                    SmoothKneeSwivel(stream, root, mid, tip, legSlot, stream.deltaTime,
-                        BasisSwivelFilterCore.MinCutoffHz, BasisSwivelFilterCore.Beta, BasisSwivelFilterCore.DerivCutoffHz,
-                        conditionOnPole: true, holdWhenSingular: true);
+                    SmoothKneeSwivel(root, mid, tip, legSlot, BasisSwivelFilterCore.MinCutoffHz, BasisSwivelFilterCore.Beta, BasisSwivelFilterCore.DerivCutoffHz, conditionOnPole: true, holdWhenSingular: true);
                 }
             }
         }
-        void RecordHipDiagnostics(BasisPoseStream stream, BasisBoneHandle root, BasisBoneHandle mid, int slot)
+        void RecordHipDiagnostics(BasisBoneHandle root, BasisBoneHandle mid, int slot)
         {
-            if (!legDiagnostics.IsCreated || slot < 0 || slot >= legDiagnostics.Length || !handleHips.IsValid(stream))
+            if (!plan.hasLegDiagnostics || !plan.hasHips)
             {
                 return;
             }
 
-            Vector3 femur = mid.GetPosition(stream) - root.GetPosition(stream);
+            Vector3 femur = poseStream.GetPosition(mid) - poseStream.GetPosition(root);
             if (!(femur.sqrMagnitude > 1e-8f))
             {
                 return;
             }
 
-            Quaternion hipsRot = handleHips.GetRotation(stream);
-            Quaternion hipsInv = Quaternion.Inverse(hipsRot);
+            Quaternion hipsRot = poseStream.GetRotation(handleHips), hipsInv = Quaternion.Inverse(hipsRot);
             Vector3 femurLocal = (hipsInv * femur).normalized;
 
-            BasisLegDiagnostics d = legDiagnostics[slot];
-
+            ref BasisLegDiagnostics d = ref Ref(legDiagnostics, slot);
             d.HipFlexionDeg = Mathf.Atan2(femurLocal.z, -femurLocal.y) * Mathf.Rad2Deg;
             d.HipAbductionDeg = Mathf.Atan2(femurLocal.x, -femurLocal.y) * Mathf.Rad2Deg;
-            d.FemurTwistDeg = TwistDeg(hipsInv * root.GetRotation(stream), femurLocal);
-            legDiagnostics[slot] = d;
+            d.FemurTwistDeg = TwistDeg(hipsInv * poseStream.GetRotation(root), femurLocal);
         }
-        void SmoothKneeSwivel(BasisPoseStream stream, BasisBoneHandle root, BasisBoneHandle mid, BasisBoneHandle tip, int slot, float dt, float minCutoffHz, float beta, float derivCutoffHz, bool conditionOnPole, bool holdWhenSingular)
+        void SmoothKneeSwivel(BasisBoneHandle root, BasisBoneHandle mid, BasisBoneHandle tip, int slot, float minCutoffHz, float beta, float derivCutoffHz, bool conditionOnPole, bool holdWhenSingular)
         {
-            if (!legSwivelInit.IsCreated || !legSwivelRaw.IsCreated || !legSwivelSmooth.IsCreated
-                || (uint)slot >= (uint)legSwivelInit.Length || (uint)slot >= (uint)legSwivelRaw.Length
-                || (uint)slot >= (uint)legSwivelSmooth.Length || !handleHips.IsValid(stream))
-            {
-                return;
-            }
+            ref BasisLegSlotState leg = ref Ref(legState, slot);
             BasisSwivelSmootherInput input = default;
-            input.Root = root.GetPosition(stream);
-            input.Mid = mid.GetPosition(stream);
-            input.Tip = tip.GetPosition(stream);
-            input.BodyRotation = handleHips.GetRotation(stream);
+            input.Root = poseStream.GetPosition(root);
+            input.Mid = poseStream.GetPosition(mid);
+            input.Tip = poseStream.GetPosition(tip);
+            input.BodyRotation = poseStream.GetRotation(handleHips);
             input.ReferenceLocal = Vector3.forward;
             input.FallbackLocal = Vector3.right;
             input.TransportHomeLocal = Vector3.down;
-            input.Dt = dt;
+            input.Dt = poseStream.deltaTime;
             input.MinCutoffHz = minCutoffHz;
             input.Beta = beta;
             input.DerivCutoffHz = derivCutoffHz;
@@ -223,26 +179,24 @@ namespace Basis.IK
             input.HoldWhenSingular = holdWhenSingular;
             input.HoldCondLo = BasisSwivelSmootherCore.DefaultHoldCondLo;
             input.HoldCondHi = BasisSwivelSmootherCore.DefaultHoldCondHi;
-            input.State = new BasisSwivelFilterState { Raw = legSwivelRaw[slot].x, Vel = legSwivelRaw[slot].y, Smooth = legSwivelSmooth[slot].x };
-            input.Seeded = legSwivelInit[slot] != 0;
+            input.State = leg.Swivel;
+            input.Seeded = leg.SwivelSeeded;
 
             BasisSwivelSmootherCore.Solve(input, out BasisSwivelSmootherResult result);
-            if (legDiagnostics.IsCreated && slot < legDiagnostics.Length)
+            if (plan.hasLegDiagnostics)
             {
-                BasisLegDiagnostics d = legDiagnostics[slot];
+                ref BasisLegDiagnostics d = ref Ref(legDiagnostics, slot);
                 d.RawSwivelDeg = result.RawSwivelDeg;
                 d.SmoothSwivelDeg = result.SmoothSwivelDeg;
                 d.Conditioning = result.Conditioning;
                 d.HoldGate = result.HoldGate;
                 d.AnteriorGuardApplied = result.AnteriorGuardApplied ? 1f : 0f;
                 d.Seeded = result.Seeded ? 1f : 0f;
-                legDiagnostics[slot] = d;
             }
             if (result.WriteState)
             {
-                legSwivelRaw[slot] = new Vector3(result.State.Raw, result.State.Vel, 0f);
-                legSwivelSmooth[slot] = new Vector3(result.State.Smooth, 0f, 0f);
-                legSwivelInit[slot] = 1;
+                leg.Swivel = result.State;
+                leg.SwivelSeeded = true;
             }
             if (!result.Valid)
             {
@@ -250,18 +204,15 @@ namespace Basis.IK
             }
 
             Vector3 preFoot = input.Tip;
-            Quaternion preFootRot = tip.GetRotation(stream);
-            SwingElbowAroundAC(stream, root, mid, tip, result.DesiredMid);
-            tip.SetPosition(stream, preFoot);
-            tip.SetRotation(stream, preFootRot);
+            Quaternion preFootRot = poseStream.GetRotation(tip);
+            SwingElbowAroundAC(root, mid, tip, result.DesiredMid);
+            poseStream.SetPosition(tip, preFoot);
+            poseStream.SetRotation(tip, preFootRot);
         }
-        public void ApplyToeSurfaceBend(BasisPoseStream stream, BasisBoneHandle handle, float bendDeg, Vector3 axis)
+        public void ApplyToeSurfaceBend(BasisBoneHandle handle, float bendDeg, Vector3 axis)
         {
-            if (!handle.IsValid(stream)) return;
-            if (Mathf.Abs(bendDeg) < 0.01f || axis.sqrMagnitude < 1e-6f) return;
-
-            Quaternion current = handle.GetRotation(stream);
-            handle.SetRotation(stream, Quaternion.AngleAxis(-bendDeg, axis.normalized) * current);
+            Quaternion current = poseStream.GetRotation(handle);
+            poseStream.SetRotation(handle, Quaternion.AngleAxis(-bendDeg, axis.normalized) * current);
         }
     }
 }
