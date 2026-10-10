@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 [System.Serializable]
 public class BasisTrackedBundleWrapper
 {
@@ -9,6 +11,12 @@ public class BasisTrackedBundleWrapper
     public BasisLoadableBundle LoadableBundle;
     [SerializeField]
     public AssetBundle AssetBundle;
+    [System.NonSerialized]
+    public GraphicsStateCollection EmbeddedGraphicsStates;
+    [System.NonSerialized]
+    public BasisBundleSection EmbeddedGraphicsStatePayload;
+    [System.NonSerialized]
+    private Task<GraphicsStateCollection> embeddedGraphicsStateLoad;
     /// <summary>
     /// Generic (glTF) content loads produce a hidden template instance instead of an
     /// AssetBundle: an inactive DontDestroyOnLoad holder owning the imported avatar with its
@@ -29,11 +37,26 @@ public class BasisTrackedBundleWrapper
     /// </summary>
     [System.NonSerialized]
     public string ObservedVersionTag;
+    /// <summary>
+    /// Unity editor version stored in the native UnityFS AssetBundle header. Populated while the
+    /// decrypted bytes are available, before Unity takes ownership of the bundle load request.
+    /// Empty for generic glTF content and malformed/legacy bundle headers.
+    /// </summary>
+    [System.NonSerialized]
+    public string BuiltWithUnityVersion;
     public bool HasGltfTemplate => GltfTemplateAvatarRoot != null;
     #if UNITY_BUNDLEUNLOAD
     [SerializeField]
     public bool IsBundleBackingStoreReleased = false;
     #endif
+    /// <summary>
+    /// Sentinel parked in <see cref="_requestedTimes"/> by <see cref="TryClaimUnload"/>. Reaching
+    /// zero is not enough to unload: the old code re-read the count and then called Unload(true),
+    /// so an Increment landing in that gap got a reservation on a bundle whose assets were about to
+    /// be destroyed. Claiming the count instead makes "nobody holds this" and "nobody may take it"
+    /// one atomic step, and Increment refuses once the claim is in.
+    /// </summary>
+    private const int UnloadClaimed = int.MinValue;
     private int _requestedTimes = 0;
     public bool IsInUse => Volatile.Read(ref _requestedTimes) > 0;
     public bool DidErrorOccur = false;
@@ -104,6 +127,29 @@ public class BasisTrackedBundleWrapper
         }
     }
 
+    public void UnloadEmbeddedGraphicsStates()
+    {
+        if (EmbeddedGraphicsStates != null)
+        {
+            UnityEngine.Object.Destroy(EmbeddedGraphicsStates);
+            EmbeddedGraphicsStates = null;
+        }
+        EmbeddedGraphicsStatePayload = default;
+        embeddedGraphicsStateLoad = null;
+    }
+
+    public async Task<GraphicsStateCollection> EnsureEmbeddedGraphicsStatesLoaded(BasisProgressReport progress = null)
+    {
+        if (EmbeddedGraphicsStates != null || !EmbeddedGraphicsStatePayload.HasPayload)
+            return EmbeddedGraphicsStates;
+
+        embeddedGraphicsStateLoad ??= BasisEncryptionToData.LoadEmbeddedGraphicsStates(
+            LoadableBundle.UnlockPassword, EmbeddedGraphicsStatePayload, progress);
+        EmbeddedGraphicsStates = await embeddedGraphicsStateLoad;
+        EmbeddedGraphicsStatePayload = default;
+        return EmbeddedGraphicsStates;
+    }
+
     // TODO: Bug in here
     // when loading in multiple same scenes and unloading one of them
     // it will remove other duplicate scenes?
@@ -124,7 +170,7 @@ public class BasisTrackedBundleWrapper
         if (Volatile.Read(ref _requestedTimes) <= 0)
         {
             await Task.Delay(TimeSpan);
-            if (Volatile.Read(ref _requestedTimes) <= 0)
+            if (TryClaimUnload())
             {
                 if (isGltfContent)
                 {
@@ -143,6 +189,7 @@ public class BasisTrackedBundleWrapper
 
                     BasisDebug.LogError("Asset Bundle was null this should never occur");
                     #endif
+                    ReleaseUnloadClaim();
                     return false;
                 }
                 BasisDebug.Log("Unloading Bundle " + AssetBundle.name);
@@ -153,8 +200,10 @@ public class BasisTrackedBundleWrapper
                 // whose Animator.avatar is null).
                 if (!BasisLoadHandler.TryUnloadBundleAssets(this))
                 {
+                    ReleaseUnloadClaim();
                     return false;
                 }
+                UnloadEmbeddedGraphicsStates();
                 #if UNITY_BUNDLEUNLOAD
                 AssetBundle = null;
                 IsBundleBackingStoreReleased = true;
@@ -172,9 +221,23 @@ public class BasisTrackedBundleWrapper
             return false;
         }
     }
+    /// <summary>
+    /// Takes a reservation. Returns false when an unload has already been claimed on this wrapper,
+    /// in which case the caller must treat the lookup as a MISS and load fresh: the assets are gone
+    /// or about to be.
+    /// </summary>
     public bool Increment()
     {
-        Interlocked.Increment(ref _requestedTimes);
+        int current;
+        do
+        {
+            current = Volatile.Read(ref _requestedTimes);
+            if (current == UnloadClaimed)
+            {
+                return false;
+            }
+        } while (Interlocked.CompareExchange(ref _requestedTimes, current + 1, current) != current);
+
      //   BasisDebug.Log($"Incremented Asset Load {LoadableBundle.BasisLocalEncryptedBundle.DownloadedBeeFileLocation}");
         return true;
     }
@@ -194,6 +257,19 @@ public class BasisTrackedBundleWrapper
        // BasisDebug.Log($"DeIncremented Asset Load {LoadableBundle.BasisLocalEncryptedBundle.DownloadedBeeFileLocation}");
         return true;
     }
+    /// <summary>
+    /// Atomically moves an unreserved wrapper into the unloading state. Succeeds only from exactly
+    /// zero reservations, so it cannot race an Increment; pair a failed unload with
+    /// <see cref="ReleaseUnloadClaim"/> so the wrapper stays loadable.
+    /// </summary>
+    public bool TryClaimUnload()
+    {
+        return Interlocked.CompareExchange(ref _requestedTimes, UnloadClaimed, 0) == 0;
+    }
+    public void ReleaseUnloadClaim()
+    {
+        Interlocked.CompareExchange(ref _requestedTimes, 0, UnloadClaimed);
+    }
 #if UNITY_BUNDLEUNLOAD
     public void ReleaseBundleBackingStore()
     {
@@ -206,6 +282,7 @@ public class BasisTrackedBundleWrapper
         BasisDebug.Log("Releasing bundle backing store " + AssetBundle.name);
         AssetBundle.Unload(false);
         AssetBundle = null;
+        UnloadEmbeddedGraphicsStates();
         IsBundleBackingStoreReleased = true;
         BasisDebug.Log("Bundle backing store released for headless scene bundle.");
 

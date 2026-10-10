@@ -119,6 +119,7 @@ namespace Basis.BasisUI
 
             BasisProgressReport report = new BasisProgressReport();
             report.OnProgressReport += ForwardProgress;
+            report.OnProgressReport += BasisUILoadingBar.ProgressReport;
             using CancellationTokenSource cts = new CancellationTokenSource();
             BasisRuntimeSpawnRegistry.PendingLoad pending = BasisRuntimeSpawnRegistry.BeginPendingLoad(
                 item.Url,
@@ -185,6 +186,7 @@ namespace Basis.BasisUI
             {
                 report.OnProgressReport -= ForwardPendingProgress;
                 report.OnProgressReport -= ForwardProgress;
+                report.OnProgressReport -= BasisUILoadingBar.ProgressReport;
                 BasisRuntimeSpawnRegistry.EndPendingLoad(pending.PendingId);
             }
         }
@@ -285,6 +287,15 @@ namespace Basis.BasisUI
             return newBounds;
         }
 
+        private static bool TryFindPlacementDevice(BasisDeviceManagement deviceInstance, out BasisInput input)
+        {
+            if (deviceInstance.FindDevice(out input, BasisDominantHand.DominantRole) && input.BasisPointRaycaster != null) return true;
+            if (deviceInstance.FindDevice(out input, BasisDominantHand.NonDominantRole) && input.BasisPointRaycaster != null) return true;
+            if (deviceInstance.FindDevice(out input, BasisBoneTrackedRole.CenterEye) && input.BasisPointRaycaster != null) return true;
+            input = null;
+            return false;
+        }
+
         public static async Task LoadProp(BasisDataStoreItemKeys.ItemKey item, BundledContentHolder.NetworkType desiredNetworkType, bool persistent = false, bool admin = false, bool modifyScale = false)
         {
             if (PropSpawnClaimed(item.Url)) return;
@@ -326,11 +337,9 @@ namespace Basis.BasisUI
                     case BasisPropSpawnPlacement.Unspecified:
                         BasisDeviceManagement deviceInstance = BasisDeviceManagement.Instance;
 
-                        if (!deviceInstance.FindDevice(out BasisInput input, BasisDominantHand.DominantRole) &&
-                            !deviceInstance.FindDevice(out input, BasisDominantHand.NonDominantRole) &&
-                            !deviceInstance.FindDevice(out input, BasisBoneTrackedRole.CenterEye))
+                        if (!TryFindPlacementDevice(deviceInstance, out BasisInput input))
                         {
-                            BasisDebug.LogError("LoadProp failed: no suitable device found (LeftHand/RightHand/CenterEye).");
+                            BasisDebug.LogError("LoadProp failed: no device with an active BasisPointRaycaster found (LeftHand/RightHand/CenterEye).");
                             return;
                         }
 
@@ -585,6 +594,7 @@ namespace Basis.BasisUI
 
                             BasisProgressReport report = new BasisProgressReport();
                             report.OnProgressReport += ForwardProgress;
+                            report.OnProgressReport += BasisUILoadingBar.ProgressReport;
                             using CancellationTokenSource cts = new CancellationTokenSource();
                             BasisRuntimeSpawnRegistry.PendingLoad pending = BasisRuntimeSpawnRegistry.BeginPendingLoad(
                                 item.Url,
@@ -646,6 +656,7 @@ namespace Basis.BasisUI
                             {
                                 report.OnProgressReport -= ForwardPendingProgress;
                                 report.OnProgressReport -= ForwardProgress;
+                                report.OnProgressReport -= BasisUILoadingBar.ProgressReport;
                                 BasisRuntimeSpawnRegistry.EndPendingLoad(pending.PendingId);
                             }
                         }

@@ -1,5 +1,6 @@
 using Basis.Network.Core;
 using Basis.Network.Server.Auth;
+using Basis.Network.Server.Generic;
 using BasisNetworkCore;
 using BasisNetworkCore.Security;
 using BasisNetworkServer.Security;
@@ -142,11 +143,12 @@ internal static class LifecycleSupport
         };
     }
 
-    /// <summary>The exact wire order the real client writes: [version][BytesMessage auth][ReadyMessage].</summary>
-    public static byte[] ConnectPayload(ushort version, byte[]? auth, ReadyMessage? ready)
+    /// <summary>The exact wire order the real client writes: [version][company][product][BytesMessage auth][ReadyMessage].</summary>
+    public static byte[] ConnectPayload(ushort version, byte[]? auth, ReadyMessage? ready, string companyName = BasisNetworkApplication.DefaultCompanyName, string productName = BasisNetworkApplication.DefaultProductName)
     {
         NetDataWriter w = new NetDataWriter(true, 64);
         w.Put(version);
+        BasisNetworkApplication.Write(w, companyName, productName);
         if (auth != null)
         {
             new BytesMessage().Serialize(w, auth);
@@ -269,6 +271,108 @@ public class BasisConnectionRequestGateTests
     }
 
     [Fact]
+    public void MissingApplicationIdentity_IsRejectedAsInvalidClientData()
+    {
+        using var scope = new ServerStaticsScope();
+        InstallOpenServer(scope);
+
+        NetDataWriter w = new NetDataWriter(true, 8);
+        w.Put(BasisNetworkVersion.ServerVersion);
+        RecordingConnectionRequest req = LifecycleSupport.Request(w.CopyData());
+        BasisServerHandleEvents.HandleConnectionRequest(req);
+
+        Assert.True(req.WasRejected);
+        Assert.False(req.WasAccepted);
+        Assert.Equal("Invalid client data.", LifecycleSupport.RejectReason(req.RejectPayload));
+    }
+
+    [Theory]
+    [InlineData("Someone Else", BasisNetworkApplication.DefaultProductName)]
+    [InlineData(BasisNetworkApplication.DefaultCompanyName, "Someone Else")]
+    [InlineData("basis unity", "basis unity")]
+    [InlineData("", "")]
+    public void UnsupportedApplication_IsRejected_BeforeAuth(string companyName, string productName)
+    {
+        using var scope = new ServerStaticsScope();
+        InstallOpenServer(scope);
+        NetworkServer.Configuration.UseAuth = true;
+        ((FakeAuth)NetworkServer.Auth).Result = false;
+
+        ReadyMessage ready = LifecycleSupport.MakeReady(LifecycleSupport.NewUuid(), "Connie");
+        byte[] data = LifecycleSupport.ConnectPayload(BasisNetworkVersion.ServerVersion, new byte[] { 1 }, ready, companyName, productName);
+        RecordingConnectionRequest req = LifecycleSupport.Request(data, accepted: LifecycleSupport.Peer(LifecycleSupport.NextPeerId()));
+        BasisServerHandleEvents.HandleConnectionRequest(req);
+
+        Assert.True(req.WasRejected);
+        Assert.False(req.WasAccepted);
+        Assert.Equal(BasisNetworkApplication.UnsupportedReason(BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName, companyName, productName), LifecycleSupport.RejectReason(req.RejectPayload));
+    }
+
+    [Fact]
+    public void ConfiguredApplication_IsWhatTheServerAccepts()
+    {
+        using var scope = new ServerStaticsScope();
+        InstallOpenServer(scope);
+        NetworkServer.Configuration.CompanyName = "Fork Co";
+        NetworkServer.Configuration.ProductName = "Fork VR";
+
+        byte[] stockData = LifecycleSupport.ConnectPayload(BasisNetworkVersion.ServerVersion, new byte[] { 1 }, LifecycleSupport.MakeReady(LifecycleSupport.NewUuid(), "Connie"));
+        RecordingConnectionRequest stock = LifecycleSupport.Request(stockData, accepted: LifecycleSupport.Peer(LifecycleSupport.NextPeerId()));
+        BasisServerHandleEvents.HandleConnectionRequest(stock);
+
+        Assert.True(stock.WasRejected);
+        Assert.False(stock.WasAccepted);
+        Assert.Equal(BasisNetworkApplication.UnsupportedReason("Fork Co", "Fork VR", BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName), LifecycleSupport.RejectReason(stock.RejectPayload));
+
+        int id = LifecycleSupport.NextPeerId();
+        FakeNetPeer peer = LifecycleSupport.Peer(id);
+        byte[] forkData = LifecycleSupport.ConnectPayload(BasisNetworkVersion.ServerVersion, new byte[] { 1 }, LifecycleSupport.MakeReady(LifecycleSupport.NewUuid(), "Connie"), "Fork Co", "Fork VR");
+        RecordingConnectionRequest fork = LifecycleSupport.Request(forkData, accepted: peer);
+        BasisServerHandleEvents.HandleConnectionRequest(fork);
+
+        Assert.True(fork.WasAccepted);
+        Assert.False(fork.WasRejected);
+        Assert.True(NetworkServer.AuthenticatedPeers.TryGetValue(id, out NetPeer stored));
+        Assert.Same(peer, stored);
+    }
+
+    [Fact]
+    public void ApplicationIdentity_DefaultPairCostsOneByte_AndRoundTrips()
+    {
+        NetDataWriter w = new NetDataWriter(true, 16);
+        BasisNetworkApplication.Write(w, BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName);
+        Assert.Equal(1, w.Length);
+
+        Assert.True(BasisNetworkApplication.TryRead(new NetDataReader(w.CopyData()), out string company, out string product));
+        Assert.Equal(BasisNetworkApplication.DefaultCompanyName, company);
+        Assert.Equal(BasisNetworkApplication.DefaultProductName, product);
+        Assert.Equal(3, LifecycleSupport.ConnectPayload(BasisNetworkVersion.ServerVersion, null, null).Length);
+    }
+
+    [Fact]
+    public void ApplicationIdentity_OtherPairsRoundTripAsClampedStrings()
+    {
+        NetDataWriter w = new NetDataWriter(true, 16);
+        BasisNetworkApplication.Write(w, "Fork Co", new string('p', BasisNetworkApplication.MaxNameLength + 10));
+        Assert.True(w.Length > 1);
+
+        Assert.True(BasisNetworkApplication.TryRead(new NetDataReader(w.CopyData()), out string company, out string product));
+        Assert.Equal("Fork Co", company);
+        Assert.Equal(BasisNetworkApplication.MaxNameLength, product.Length);
+    }
+
+    [Fact]
+    public void ApplicationIdentity_RejectsUnknownTagsAndTruncatedStrings()
+    {
+        Assert.False(BasisNetworkApplication.TryRead(new NetDataReader(System.Array.Empty<byte>()), out _, out _));
+        Assert.False(BasisNetworkApplication.TryRead(new NetDataReader(new byte[] { 7 }), out _, out _));
+        Assert.False(BasisNetworkApplication.TryRead(new NetDataReader(new byte[] { 0, 2, 0 }), out _, out _));
+        Assert.True(BasisNetworkApplication.Matches(BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName, BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName));
+        Assert.False(BasisNetworkApplication.Matches(BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName, BasisNetworkApplication.DefaultCompanyName + " ", BasisNetworkApplication.DefaultProductName));
+        Assert.False(BasisNetworkApplication.Matches(BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName, null, BasisNetworkApplication.DefaultProductName));
+    }
+
+    [Fact]
     public void VersionMismatch_IsRejectedWithStructuredVersionMismatchKind()
     {
         using var scope = new ServerStaticsScope();
@@ -297,6 +401,7 @@ public class BasisConnectionRequestGateTests
         // Correct version, then a BytesMessage length that overruns the buffer → Deserialize fails.
         NetDataWriter w = new NetDataWriter(true, 8);
         w.Put(BasisNetworkVersion.ServerVersion);
+        BasisNetworkApplication.Write(w, BasisNetworkApplication.DefaultCompanyName, BasisNetworkApplication.DefaultProductName);
         w.Put((ushort)500); // claims 500 bytes, none follow
         RecordingConnectionRequest req = LifecycleSupport.Request(w.CopyData());
         BasisServerHandleEvents.HandleConnectionRequest(req);
@@ -345,6 +450,51 @@ public class BasisConnectionRequestGateTests
         Assert.Same(NetworkServer.AuthenticatedPeerTag, peer.Tag);
         // The peer must have received its ServerMetaData on the metadata channel.
         Assert.Contains(peer.Sent, s => s.Channel == BasisNetworkCommons.metaDataChannel);
+    }
+
+    [Fact]
+    public void MalformedReadyMessage_IsRejected_WithoutAccepting()
+    {
+        using var scope = new ServerStaticsScope();
+        InstallOpenServer(scope);
+
+        int id = LifecycleSupport.NextPeerId();
+        FakeNetPeer peer = LifecycleSupport.Peer(id);
+        ReadyMessage ready = LifecycleSupport.MakeReady(LifecycleSupport.NewUuid(), "Broken");
+        ready.clientAvatarChangeMessage.byteArray = null;
+        byte[] data = LifecycleSupport.ConnectPayload(BasisNetworkVersion.ServerVersion, new byte[] { 1 }, ready);
+        RecordingConnectionRequest req = LifecycleSupport.Request(data, accepted: peer);
+
+        BasisServerHandleEvents.HandleConnectionRequest(req);
+
+        Assert.True(req.WasRejected);
+        Assert.False(req.WasAccepted);
+        Assert.Equal("Invalid ReadyMessage received.", LifecycleSupport.RejectReason(req.RejectPayload));
+        Assert.False(NetworkServer.AuthenticatedPeers.ContainsKey(id));
+        Assert.NotSame(NetworkServer.AuthenticatedPeerTag, peer.Tag);
+    }
+
+    [Fact]
+    public void AnonymousUuid_IsMintedPerConnection_OnThePlainPath()
+    {
+        using var scope = new ServerStaticsScope();
+        InstallOpenServer(scope);
+
+        FakeNetPeer first = LifecycleSupport.Peer(LifecycleSupport.NextPeerId());
+        FakeNetPeer second = LifecycleSupport.Peer(LifecycleSupport.NextPeerId());
+        foreach (FakeNetPeer peer in new[] { first, second })
+        {
+            byte[] data = LifecycleSupport.ConnectPayload(BasisNetworkVersion.ServerVersion, new byte[] { 1 }, LifecycleSupport.MakeReady(string.Empty, "Anon"));
+            BasisServerHandleEvents.HandleConnectionRequest(LifecycleSupport.Request(data, accepted: peer));
+        }
+
+        Assert.True(NetworkServer.AuthenticatedPeers.ContainsKey(first.Id));
+        Assert.True(NetworkServer.AuthenticatedPeers.ContainsKey(second.Id));
+        Assert.True(BasisSavedState.GetLastPlayerMetaData(first, out ClientMetaDataMessage firstMeta));
+        Assert.True(BasisSavedState.GetLastPlayerMetaData(second, out ClientMetaDataMessage secondMeta));
+        Assert.NotEqual(ClientMetaDataMessage.Unset, firstMeta.playerUUID);
+        Assert.NotEqual(ClientMetaDataMessage.Unset, secondMeta.playerUUID);
+        Assert.NotEqual(firstMeta.playerUUID, secondMeta.playerUUID);
     }
 }
 
@@ -612,10 +762,40 @@ public class BasisDisconnectLifecycleTests
 
         int id = LifecycleSupport.NextPeerId();
         FakeNetPeer stranger = LifecycleSupport.Peer(id); // never inserted into AuthenticatedPeers
+        (_, FakeNetPeer witness) = Connected(LifecycleSupport.NextPeerId());
+        NetworkServer.RebuildPeerSnapshot();
+        BasisServerHandleEvents.JoinBroadcast.Stop();
 
         BasisServerHandleEvents.HandlePeerDisconnected(stranger, Info(DisconnectReason.ConnectionFailed));
+        BasisServerHandleEvents.JoinBroadcast.Flush();
 
         Assert.False(NetworkServer.AuthenticatedPeers.ContainsKey(id));
+        // Nobody was ever told this peer existed, so nobody is told it left either.
+        Assert.Empty(witness.Sent);
+    }
+
+    [Fact]
+    public void RejectingAnAdmittedPeer_StillAnnouncesTheDeparture()
+    {
+        using var scope = new ServerStaticsScope();
+        InstallServer();
+
+        int leavingId = LifecycleSupport.NextPeerId();
+        (_, FakeNetPeer leaving) = Connected(leavingId);
+        (_, FakeNetPeer witness) = Connected(LifecycleSupport.NextPeerId());
+        NetworkServer.RebuildPeerSnapshot();
+        BasisServerHandleEvents.JoinBroadcast.Stop();
+
+        // A post-admission eviction (the headless policy flip) removes the peer itself, so the
+        // transport disconnect that follows finds nothing to remove; the notice must not be lost.
+        BasisServerHandleEvents.RejectWithReason(leaving, "policy");
+        BasisServerHandleEvents.HandlePeerDisconnected(leaving, Info());
+        BasisServerHandleEvents.JoinBroadcast.Flush();
+
+        var notice = Assert.Single(witness.Sent);
+        Assert.Equal(BasisNetworkCommons.DisconnectionChannel, notice.Channel);
+        Assert.Equal((ushort)leavingId, new NetDataReader(notice.Data).GetUShort());
+        Assert.Equal(1, leaving.DisconnectCalls);
     }
 
     [Fact]
@@ -765,5 +945,112 @@ public class BasisReconnectStateTests
         Assert.DoesNotContain(id, identity.Released);
         Assert.True(identity.NetIDToUUID(live, out string uuid) && !string.IsNullOrEmpty(uuid),
             "the live peer lost its identity to a stale peer's disconnect");
+    }
+
+    [Fact]
+    public void PeerWhoseAuthStateIsAlreadyGone_IsNotAdmitted()
+    {
+        using var scope = new ServerStaticsScope();
+        InstallServer();
+
+        int id = LifecycleSupport.NextPeerId();
+        FakeNetPeer dropped = LifecycleSupport.Peer(id);
+        string uuid = LifecycleSupport.NewUuid();
+
+        BasisServerHandleEvents.OnNetworkAccepted(dropped, LifecycleSupport.MakeReady(uuid, "Gone"), uuid);
+
+        Assert.False(NetworkServer.AuthenticatedPeers.ContainsKey(id));
+        Assert.DoesNotContain(NetworkServer.PeerSnapshot, p => ReferenceEquals(p, dropped));
+        Assert.Empty(dropped.Sent);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Concurrent admission: OnNetworkAccepted runs on parallel DID-auth continuations,
+// so two joiners can interleave. Each must still learn about the other exactly once,
+// through either its own arrival list or the join broadcast, never as a placeholder.
+// ─────────────────────────────────────────────────────────────────────────────
+
+[Collection("BasisServer shared network statics")]
+public class BasisConcurrentJoinTests
+{
+    private static List<(ushort Id, string Name)> SpawnsReceivedBy(FakeNetPeer peer)
+    {
+        List<(ushort Id, string Name)> spawns = new();
+        foreach ((byte[] Data, byte Channel, DeliveryMethod _) send in peer.Sent)
+        {
+            if (send.Channel != BasisNetworkCommons.CreateRemotePlayersForNewPeerChannel)
+            {
+                continue;
+            }
+            ServerReadyBatchMessage batch = new ServerReadyBatchMessage();
+            batch.Deserialize(new NetDataReader(send.Data));
+            NetDataReader payload = new NetDataReader(batch.Payload);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                ServerReadyMessage record = new ServerReadyMessage();
+                record.Deserialize(payload);
+                spawns.Add((record.playerIdMessage.playerID, record.localReadyMessage.playerMetaDataMessage.playerDisplayName ?? string.Empty));
+            }
+        }
+        return spawns;
+    }
+
+    [Fact]
+    public void ConcurrentJoins_EveryPeerLearnsEveryOtherExactlyOnce_WithTheirRealNames()
+    {
+        using var scope = new ServerStaticsScope();
+        NetworkServer.Configuration = new Configuration
+        {
+            PeerLimit = 1000,
+            UseAuth = false,
+            UseAuthIdentity = false,
+            BasisUserRestrictionMode = BasisUserRestrictionMode.Normal,
+        };
+        NetworkServer.Server = new FakeNetManager();
+        NetworkServer.AuthIdentity = new MapAuthIdentity();
+        NetworkServer.AllowList = new BasisAllowList();
+        NetworkServer.BanList = new BasisBanList();
+        NetworkServer.HighQualityLength = ConvertToSize(BitQuality.High);
+        BasisServerHandleEvents.JoinBroadcast.Stop();
+
+        const int joiners = 32;
+        FakeNetPeer[] peers = new FakeNetPeer[joiners];
+        string[] names = new string[joiners];
+        for (int i = 0; i < joiners; i++)
+        {
+            peers[i] = LifecycleSupport.Peer(LifecycleSupport.NextPeerId());
+            names[i] = $"Joiner{i}";
+        }
+
+        Parallel.For(0, joiners, i =>
+        {
+            string uuid = LifecycleSupport.NewUuid();
+            BasisServerHandleEvents.OnNetworkAccepted(peers[i], LifecycleSupport.MakeReady(uuid, names[i]), uuid);
+        });
+        for (int i = 0; i < joiners; i++)
+        {
+            BasisServerHandleEvents.JoinBroadcast.Flush();
+        }
+
+        for (int i = 0; i < joiners; i++)
+        {
+            List<(ushort Id, string Name)> spawns = SpawnsReceivedBy(peers[i]);
+            Assert.DoesNotContain(spawns, s => s.Id == peers[i].Id);
+            for (int j = 0; j < joiners; j++)
+            {
+                if (j == i)
+                {
+                    continue;
+                }
+                (ushort Id, string Name) spawn = Assert.Single(spawns, s => s.Id == peers[j].Id);
+                Assert.Equal(names[j], spawn.Name);
+            }
+        }
+
+        for (int i = 0; i < joiners; i++)
+        {
+            BasisServerHandleEvents.JoinBroadcast.UnregisterPeer(peers[i].Id);
+        }
     }
 }

@@ -23,7 +23,7 @@ namespace Cilbox
 			"UnityEngine.Rendering.AsyncGPUReadback",
 			"UnityEngine.Rendering.AsyncGPUReadbackRequest",
 			"Unity.Collections.NativeArray*",
-			// VRSL DMX BasisMediaPlayer bridge (zero-copy OutputTexture -> DMX grid)
+			// VRSL DMX media player bridge (zero-copy video texture -> DMX grid)
 			"BasisMediaPlayer",
 
 			// Scene-specific Basis types
@@ -195,7 +195,7 @@ namespace Cilbox
 			// TUBE world-script additions (Cilbox conversion)
 			"Basis.Scripts.Drivers.BasisLocalCameraDriver.CameraInstance",
 
-			// SteamAudioSource tuning fields for spatialized shout (issue #911). Curated
+			// SteamAudioSource tuning fields for spatialized announce (issue #911). Curated
 			// safe set: excludes native handles (reflectionsIR IntPtr), baked-data refs,
 			// SH/EQ arrays, and internal wiring (mAudioSource / Transform).
 			"SteamAudio.SteamAudioSource.directBinaural",
@@ -285,9 +285,9 @@ namespace Cilbox
 			// VRSL DMX GPU readback surface (mirrors CilboxPropBasis).
 			{ typeof(UnityEngine.Graphics), new HashSet<string>{ "Blit" } },
 			{ typeof(UnityEngine.Rendering.AsyncGPUReadback), new HashSet<string>{ "Request" } },
-			// BasisMediaPlayer: read-only video output access only. Blocks LoadUrl/LoadLocalPath/
-			// LoadSource/Play/Stop/Seek/CaptureScreenshot so sandboxed scenes can't load arbitrary
-			// media (bypassing the VideoPlayerShim URL trust prompt) or write screenshots to disk.
+			// The media player: read-only video output access only. Blocks Open/LoadUrl/
+			// Play/Pause/Seek/Stop so sandboxed scenes can't load arbitrary media,
+			// bypassing the VideoPlayerShim URL trust prompt.
 			// OutputFrameIsTopLeftOrigin is the per-client orientation flag DMX/video sinks XOR
 			// into their flip so the grid isn't upside-down on GPUs that can't normalize it.
 			{ typeof(BasisMediaPlayer), new HashSet<string>{
@@ -308,6 +308,21 @@ namespace Cilbox
 				nameof(Basis.Shims.BasisJiggleEventShim.GetJiggleRigCount),
 				nameof(Basis.Shims.BasisJiggleEventShim.GetJiggleRigName),
 				nameof(Basis.Shims.BasisJiggleEventShim.FindJiggleRig),
+				} },
+			// Local permission changes. Same shape as the jiggle events above: fetching the
+			// component is the opt-in, Rebind is only for proxies that appear late, and the
+			// callback is resolved by name off the script.
+			{ typeof(Basis.Shims.BasisPermissionEventShim), new HashSet<string>{
+				nameof(Basis.Shims.BasisPermissionEventShim.Rebind),
+				} },
+			// Graphics settings changes. Same shape as the permission events above: fetching the
+			// component is the opt-in, Rebind is only for proxies that appear late, and the
+			// callback is resolved by name off the script.
+			{ typeof(Basis.Shims.BasisGraphicsSettingsEventShim), new HashSet<string>{
+				nameof(Basis.Shims.BasisGraphicsSettingsEventShim.Rebind),
+				} },
+			{ typeof(Basis.Shims.BasisPlatformEventShim), new HashSet<string>{
+				nameof(Basis.Shims.BasisPlatformEventShim.Rebind),
 				} },
 			{ typeof(Basis.Scripts.BasisSdk.Interactions.BasisSeat), new HashSet<string>{
 				$"get_{nameof(Basis.Scripts.BasisSdk.Interactions.BasisSeat.OccupantRotationRangeDegrees)}",

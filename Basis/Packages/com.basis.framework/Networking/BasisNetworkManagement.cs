@@ -58,6 +58,12 @@ namespace Basis.Scripts.Networking
 
         public static string HostServerMotd = string.Empty;
 
+        /// <summary>
+        /// Optional application-level identity for an embedded host. Leave empty to generate a
+        /// fresh server UUID; set it explicitly when the hosted server should use a known identity.
+        /// </summary>
+        public static string HostServerUUID = string.Empty;
+
         public static int HostPeerLimit = ushort.MaxValue;
 
         public static bool HostUseAuth = true;
@@ -105,6 +111,12 @@ namespace Basis.Scripts.Networking
         /// Metadata message received from the server at connect.
         /// </summary>
         public static ServerMetaDataMessage ServerMetaDataMessage = new ServerMetaDataMessage();
+
+        /// <summary>
+        /// Application-level identity advertised by the currently connected server. Empty until
+        /// the join metadata arrives or when disconnected.
+        /// </summary>
+        public static string ServerUUID => ServerMetaDataMessage.ServerUUID ?? string.Empty;
 
         /// <summary>
         /// Local player's effective permissions decoded from the server metadata.
@@ -187,7 +199,21 @@ namespace Basis.Scripts.Networking
         static readonly ManualResetEventSlim s_computeDone = new ManualResetEventSlim(true);
         static volatile bool s_computeInFlight;
         static volatile Exception s_computeException;
-        static void RunParallelCompute() => Parallel.For(0, s_parallelCount, s_parallelOptions, s_parallelComputeBody);
+        static void RunParallelCompute()
+        {
+            if (s_parallelCount <= 4)
+            {
+                for (int i = 0; i < s_parallelCount; i++)
+                {
+                    ParallelComputeBody(i);
+                }
+            }
+            else
+            {
+                Parallel.For(0, s_parallelCount, s_parallelOptions, s_parallelComputeBody);
+            }
+            Basis.Scripts.Networking.Receivers.BasisAnnounceAudioDriver.ComputeAll();
+        }
 
         static void ComputeThreadLoop()
         {
@@ -265,6 +291,7 @@ namespace Basis.Scripts.Networking
             }
 
             BasisNetworkPlayers.PublishReceiversSnapshot();
+            Basis.Scripts.Networking.Receivers.BasisAnnounceAudioDriver.PublishComputeSnapshot();
 
             UnscaledDeltaTime = Math.Max(UnscaledDeltaTime, 0f);
             if (!math.isfinite(UnscaledDeltaTime))
@@ -306,7 +333,7 @@ namespace Basis.Scripts.Networking
             s_parallelCount = receiverCount;
             s_computePending = true;
 
-            if (receiverCount > 4)
+            if (receiverCount > 0)
             {
                 s_parallelSnapshot = snapshot;
                 s_parallelDeltaTime = UnscaledDeltaTime;
@@ -314,21 +341,13 @@ namespace Basis.Scripts.Networking
             }
             else
             {
-                for (int i = 0; i < receiverCount; i++)
-                {
-                    var rec = snapshot[i];
-                    rec.ComputeData(UnscaledDeltaTime);
-                    if (rec.AudioReceiverModule.NeedsAudioStateApply)
-                    {
-                        s_decodedIndices[s_decodedCount++] = i;
-                    }
-                }
+                Basis.Scripts.Networking.Receivers.BasisAnnounceAudioDriver.ComputeAll();
             }
         }
 
         /// <summary>
         /// Joins the background compute from <see cref="BeginNetworkCompute"/>, then runs the
-        /// main-thread finish: Phase 3 AudioSource apply, interpolation job schedule, shout drain,
+        /// main-thread finish: Phase 3 AudioSource apply, interpolation job schedule, announce drain,
         /// and profiler update. Must run before any receiver state is mutated this frame.
         /// </summary>
         public static void CompleteNetworkCompute(float DeltaTime)
@@ -349,7 +368,7 @@ namespace Basis.Scripts.Networking
             }
 
             BasisRemoteNetworkDriver.Compute();
-            Basis.Scripts.Networking.Receivers.BasisShoutAudioDriver.DrainAll();
+            Basis.Scripts.Networking.Receivers.BasisAnnounceAudioDriver.DrainAll();
             Basis.Scripts.Networking.VoiceRecording.BasisVoiceRecording.Tick();
 #if UNITY_EDITOR
             // Editor-only: counters are fed by AddToCounter, which is [Conditional("UNITY_EDITOR")].
@@ -446,7 +465,7 @@ namespace Basis.Scripts.Networking
                 if (poseLodEnabled && remote.PoseSkipCounter > 0 && !receiver.HasOverriddenDestination)
                 {
                     remote.PoseSkipCounter--;
-                    if (skipPtr != null && receiver.playerId < BasisRemoteNetworkDriver.FixedCapacity) skipPtr[receiver.playerId] = 1;
+                    if (skipPtr != null && receiver.playerId < BasisRemoteNetworkDriver.Capacity) skipPtr[receiver.playerId] = 1;
                     if (endEffectorIK) BasisRemoteNetworkDriver.ClearEffectorMask(receiver.playerId);
 #if UNITY_EDITOR
                     _skipped++;
@@ -466,7 +485,7 @@ namespace Basis.Scripts.Networking
                     int lod = math.clamp(remote.CurrentLodLevel, 0, 3);
                     remote.PoseSkipCounter = SMModuleDistanceBasedReductions.PoseSkipByLod[lod];
                 }
-                if (skipPtr != null && receiver.playerId < BasisRemoteNetworkDriver.FixedCapacity) skipPtr[receiver.playerId] = 0;
+                if (skipPtr != null && receiver.playerId < BasisRemoteNetworkDriver.Capacity) skipPtr[receiver.playerId] = 0;
                 if (endEffectorIK) receiver.WriteEffectorJobInputs();
             }
             // The loop above is the last writer of the filtered hips overrides this job reads, so

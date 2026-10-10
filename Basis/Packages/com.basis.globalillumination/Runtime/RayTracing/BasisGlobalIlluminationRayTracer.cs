@@ -92,16 +92,15 @@ public sealed class BasisGlobalIlluminationRayTracer : IDisposable
     /// registers itself here before the refresh it triggers, so the worst case for any camera after that
     /// first frame is nothing at all.
     /// </summary>
-    public void SubmitViewer(Camera camera, int frame)
+    public void SubmitViewer(Camera camera,Vector3 Position, int frame)
     {
-        viewers.Submit(camera, frame);
+        viewers.Submit(camera, Position, frame);
     }
 
     /// <summary>Refreshes the scene once per frame no matter how many cameras ask for it.</summary>
-    public bool Refresh(in BasisGlobalIlluminationRaySceneSettings sceneSettings, in BasisGlobalIlluminationRayLightSettings lightSettings,
-        Camera camera, int frame, float time)
+    public bool Refresh(in BasisGlobalIlluminationRaySceneSettings sceneSettings, in BasisGlobalIlluminationRayLightSettings lightSettings,Camera camera,Vector3 Position, int frame, float time)
     {
-        SubmitViewer(camera, frame);
+        SubmitViewer(camera, Position, frame);
         if (frame == lastRefreshFrame) { return Ready; }
         lastRefreshFrame = frame;
 
@@ -125,13 +124,24 @@ public sealed class BasisGlobalIlluminationRayTracer : IDisposable
     public static SkyBinding ResolveSky(BasisGlobalIlluminationFallback fallback, float intensity)
     {
         // The cubemap is resolved even when the fallback is off so the kernel always has something bound,
-        // and only the intensity decides whether a miss reads it.
+        // and only the intensity decides whether a miss reads it. Ray tracing dispatches reject an
+        // unbound declared texture even when the branch that samples it is disabled.
         float resolved = fallback == BasisGlobalIlluminationFallback.None ? 0f : Mathf.Max(0f, intensity);
 
         Texture custom = RenderSettings.customReflectionTexture;
         bool useCustom = custom != null && custom.dimension == TextureDimension.Cube;
+        // Environment reflections switched off outright - Custom source, nothing assigned - resolves to
+        // the engine's black stand-in cube, and a black cube at full intensity is not "no answer", it is
+        // a confident black answer: on a specular miss it overrides the reflection probe the lit shader
+        // already had, and every mirror gains a black sky. No binding is the honest reading - intensity
+        // zero, which a miss reports as zero confidence, and the probe survives. (For the diffuse gather
+        // the two are identical: a black cube contributes nothing either way.)
+        if (!useCustom && RenderSettings.defaultReflectionMode == DefaultReflectionMode.Custom)
+        {
+            return new SkyBinding(CoreUtils.blackCubeTexture, Vector4.zero, 0f, 0f);
+        }
         Texture cube = useCustom ? custom : ReflectionProbe.defaultTexture;
-        if (cube == null) { return new SkyBinding(null, Vector4.zero, 0f, 0f); }
+        if (cube == null) { return new SkyBinding(CoreUtils.blackCubeTexture, Vector4.zero, 0f, 0f); }
 
         Vector4 decode = useCustom ? new Vector4(1f, 1f, 0f, 0f) : ReflectionProbe.defaultTextureHDRDecodeValues;
         return new SkyBinding(cube, decode, MipFor(fallback, cube), resolved);

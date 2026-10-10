@@ -5,7 +5,6 @@ using Basis.Scripts.Common;
 using Basis.Scripts.Device_Management;
 using Basis.Scripts.Device_Management.Devices;
 using Basis.Scripts.TransformBinders.BoneControl;
-using Basis.Scripts.BasisCharacterController;
 using UnityEngine;
 
 namespace Basis.Scripts.Drivers
@@ -51,7 +50,6 @@ namespace Basis.Scripts.Drivers
 
         private const float MinHeight = 0.1f;
         private const float MaxHeight = 5f;
-        private const float TriggerThreshold = 0.5f;
 
         private static bool _grabbing;
         private static bool _capLeft;
@@ -666,7 +664,7 @@ namespace Basis.Scripts.Drivers
                         present = true;
                         // Grip is also the pickup input — while this hand is holding an interactable,
                         // don't let it drive the mover until the object is released.
-                        if (IsHandHoldingObject(device))
+                        if (IsHandHoldingObject(device) || BasisDeviceOffsetEditor.IsCapturing(device))
                         {
                             mainHeld = false;
                             rotateHeld = false;
@@ -702,7 +700,7 @@ namespace Basis.Scripts.Drivers
             local = ApplyFlipToLocalPoint(local);
         }
 
-        private static bool IsHandHoldingObject(BasisInput device)
+        public static bool IsHandHoldingObject(BasisInput device)
         {
             // A jiggle grab holds no BasisInteractableObject on purpose, so it can't be seen through
             // InteractInputs below — ask the grab driver directly or grip would pull the chain and
@@ -752,8 +750,8 @@ namespace Basis.Scripts.Drivers
         {
             switch (inputMode)
             {
-                case InputTrigger: return state.Trigger >= TriggerThreshold;
-                case InputSecondaryTrigger: return state.SecondaryTrigger >= TriggerThreshold;
+                case InputTrigger: return state.Trigger >= BasisTriggerPressure.PlaySpaceTriggerThreshold;
+                case InputSecondaryTrigger: return state.SecondaryTrigger >= BasisTriggerPressure.PlaySpaceTriggerThreshold;
                 case InputPrimary: return state.PrimaryButtonGetState;
                 case InputSecondary: return state.SecondaryButtonGetState;
                 case InputJoystick: return state.Primary2DAxisClick;

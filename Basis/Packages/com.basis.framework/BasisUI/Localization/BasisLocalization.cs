@@ -112,7 +112,6 @@ namespace Basis.BasisUI
         /// entry (from the embedded fallback) even if the file is missing.
         /// </summary>
         public static IReadOnlyList<LanguageOption> Available => _available;
-
         /// <summary>
         /// Loads the fallback (English) table and selects the active language.
         /// On first run (no persisted "language" key) the OS locale is probed
@@ -122,19 +121,28 @@ namespace Basis.BasisUI
         /// </summary>
         public static void Initialize()
         {
+            if(BasisSettingsSystem.SettingsLoaded == false)
+            {
+                BasisSettingsSystem.LoadAllSettings();
+            }
+            BasisSettingsDefaults.Language.LoadBindingValue();
+            string languageCode = BasisSettingsDefaults.Language.RawValue;
+
             if (_initialized)
             {
                 return;
             }
             _initialized = true;
-
             LoadAllTables();
-
-            var languageCode = BasisSettingsSystem.LoadString("language", DefaultLanguage);
+          //  BasisDebug.Log($"Loading Langauge {languageCode}", BasisDebug.LogTag.Language);
             if (string.IsNullOrEmpty(languageCode))
+            {
                 languageCode = DetectSystemLanguage();
 
-            SetLanguage(languageCode, notify: false);
+                BasisDebug.Log($"Detecting Language as no Language Has Been Saved Setting to {languageCode}", BasisDebug.LogTag.Language);
+                BasisSettingsDefaults.Language.SetValue(languageCode);
+            }
+            LoadLanguage(languageCode);
         }
 
         /// <summary>
@@ -146,8 +154,9 @@ namespace Basis.BasisUI
         /// </summary>
         private static string DetectSystemLanguage()
         {
-            List<string> codes = new(_available.Count);
-            for (int i = 0; i < _available.Count; i++)
+            int CodeCount = _available.Count;
+            List<string> codes = new(CodeCount);
+            for (int i = 0; i < CodeCount; i++)
             {
                 codes.Add(_available[i].Code);
             }
@@ -158,20 +167,23 @@ namespace Basis.BasisUI
         /// Switches the active language, loads its table, persists the choice,
         /// and fires <see cref="OnLanguageChanged"/>.
         /// </summary>
-        public static void SetLanguage(string languageCode)
+        public static void LoadLanguage(string languageCode)
         {
-            SetLanguage(languageCode, notify: true);
+            LoadLanguage(languageCode, notify: true);
         }
 
-        private static void SetLanguage(string languageCode, bool notify)
+        private static void LoadLanguage(string languageCode, bool notify)
         {
+            if (!_initialized)
+            {
+                Initialize();
+            }
+
             if (string.IsNullOrEmpty(languageCode))
             {
                 languageCode = DefaultLanguage;
+                BasisDebug.Log($"Submitted Empty Language Code Falled Back to  {DefaultLanguage}", BasisDebug.LogTag.Language);
             }
-
-            languageCode = BasisLocalizationCore.NormalizeLanguageCode(languageCode);
-
             _current.Clear();
             if (!string.Equals(languageCode, DefaultLanguage, StringComparison.OrdinalIgnoreCase))
             {
@@ -184,14 +196,12 @@ namespace Basis.BasisUI
                 }
                 else
                 {
-                    BasisDebug.LogError($"[BasisLocalization] Language table not loaded for code \"{languageCode}\" — falling back to English. Check that the JSON file is in an Addressable group with the \"{LanguageLabel}\" label and that the Addressables content has been built.");
+                    BasisDebug.LogError($"Language table not loaded for code \"{languageCode}\" — falling back to English. Check that the JSON file is in an Addressable group with the \"{LanguageLabel}\" label and that the Addressables content has been built.", BasisDebug.LogTag.Language);
                     languageCode = DefaultLanguage;
                 }
             }
 
             _currentLanguage = languageCode;
-            BasisSettingsSystem.SaveString("language", languageCode);
-
             if (notify)
             {
                 try
@@ -200,7 +210,7 @@ namespace Basis.BasisUI
                 }
                 catch (Exception e)
                 {
-                    BasisDebug.LogError($"[BasisLocalization] OnLanguageChanged handler threw: {e}");
+                    BasisDebug.LogError($"OnLanguageChanged handler threw: {e}", BasisDebug.LogTag.Language);
                 }
             }
         }
@@ -314,7 +324,7 @@ namespace Basis.BasisUI
             }
             catch (Exception e)
             {
-                BasisDebug.LogError($"[BasisLocalization] Failed to load language Addressables (label \"{LanguageLabel}\"): {e}");
+                BasisDebug.LogError($"Failed to load language Addressables (label \"{LanguageLabel}\"): {e}", BasisDebug.LogTag.Language);
                 if (handle.IsValid())
                 {
                     Addressables.Release(handle);
@@ -324,7 +334,7 @@ namespace Basis.BasisUI
 
             if (handle.Status != AsyncOperationStatus.Succeeded || assets == null || assets.Count == 0)
             {
-                BasisDebug.LogError($"[BasisLocalization] No assets found for Addressable label \"{LanguageLabel}\". Run \"Basis/Settings/Localization/Register Languages as Addressable\" and rebuild Addressables content.");
+                BasisDebug.LogError($"No assets found for Addressable label \"{LanguageLabel}\". Run \"Basis/Settings/Localization/Register Languages as Addressable\" and rebuild Addressables content.", BasisDebug.LogTag.Language);
                 if (handle.IsValid())
                 {
                     Addressables.Release(handle);
@@ -332,28 +342,46 @@ namespace Basis.BasisUI
                 return;
             }
 
-            for (int i = 0; i < assets.Count; i++)
+            // TextAsset.text re-decodes the whole byte blob on every access — read exactly once per file.
+            int assetCount = assets.Count;
+            var names = new string[assetCount];
+            var texts = new string[assetCount];
+            for (int i = 0; i < assetCount; i++)
             {
                 TextAsset asset = assets[i];
-                if (asset == null || string.IsNullOrEmpty(asset.text))
+                if (asset == null)
                 {
                     continue;
+                }
+                names[i] = asset.name;
+                texts[i] = asset.text;
+            }
+            Addressables.Release(handle);
+
+            var parsedTables = new BasisLanguageTable[assetCount];
+            var builtTables = new Dictionary<string, string>[assetCount];
+            System.Threading.Tasks.Parallel.For(0, assetCount, i =>
+            {
+                string text = texts[i];
+                if (string.IsNullOrEmpty(text))
+                {
+                    return;
                 }
 
                 BasisLanguageTable parsed;
                 try
                 {
-                    parsed = JsonUtility.FromJson<BasisLanguageTable>(asset.text);
+                    parsed = JsonUtility.FromJson<BasisLanguageTable>(text);
                 }
                 catch (Exception e)
                 {
-                    BasisDebug.LogError($"[BasisLocalization] Failed to parse language asset \"{asset.name}\": {e}");
-                    continue;
+                    BasisDebug.LogError($"Failed to parse language asset \"{names[i]}\": {e}", BasisDebug.LogTag.Language);
+                    return;
                 }
 
                 if (parsed == null || string.IsNullOrEmpty(parsed.code))
                 {
-                    continue;
+                    return;
                 }
 
                 Dictionary<string, string> table = new(parsed.entries?.Count ?? 0);
@@ -369,6 +397,19 @@ namespace Basis.BasisUI
 
                         table[entry.key] = entry.value ?? string.Empty;
                     }
+                }
+
+                parsedTables[i] = parsed;
+                builtTables[i] = table;
+            });
+
+            for (int Index = 0; Index < assetCount; Index++)
+            {
+                BasisLanguageTable parsed = parsedTables[Index];
+                Dictionary<string, string> table = builtTables[Index];
+                if (parsed == null || table == null)
+                {
+                    continue;
                 }
 
                 if (!_allTables.TryGetValue(parsed.code, out Dictionary<string, string> merged))
@@ -405,8 +446,6 @@ namespace Basis.BasisUI
                     _available.Add(new LanguageOption(parsed.code, nativeName));
                 }
             }
-
-            Addressables.Release(handle);
         }
     }
 }

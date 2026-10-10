@@ -177,14 +177,12 @@ namespace Basis.Scripts.BasisSdk.Interactions
             // and when it is being removed (e.g., OpenXR eye tracking detected late).
             RemoveInput(input.UniqueDeviceIdentifier);
         }
+        // Ceiling on how much a larger target avatar may widen the pick radius.
 
         // Simulate after IK update
         [BurstCompile]
         private void PollSystem()
         {
-#if UNITY_EDITOR // just remove when you're profiling this
-            UnityEngine.Profiling.Profiler.BeginSample("Interactable System");
-#endif
             if (InteractInputs == null)
             {
                 return;
@@ -195,6 +193,9 @@ namespace Basis.Scripts.BasisSdk.Interactions
             {
                 return;
             }
+#if UNITY_EDITOR // just remove when you're profiling this
+            UnityEngine.Profiling.Profiler.BeginSample("Interactable System");
+#endif
 
             for (int index = 0; index < interactInputsCount; index++)
             {
@@ -209,10 +210,21 @@ namespace Basis.Scripts.BasisSdk.Interactions
                 bool gripPressedAgain = gripDown && !interactInput.wasGripDown;
                 interactInput.wasGripDown = gripDown;
 
-                bool triggerDown = interactInput.input.CurrentInputState.Trigger >= BasisJiggleGrabDriver.GrabTriggerThreshold;
+                bool triggerDown = interactInput.input.CurrentInputState.Trigger >= BasisTriggerPressure.TriggerDownThreshold;
                 bool triggerPressedAgain = triggerDown && !interactInput.wasTriggerDown;
                 interactInput.wasTriggerDown = triggerDown;
                 bool desktopEye = IsDesktopCenterEye(interactInput.input);
+
+                if (BasisDeviceOffsetEditor.IsCapturing(interactInput.input) || !interactInput.input.PointerActive)
+                {
+                    interactInput.HasvalidRay = false;
+                    if (interactInput.lastTarget != null && interactInput.lastTarget.IsHoveredBy(interactInput.input))
+                    {
+                        interactInput.lastTarget.OnHoverEnd(interactInput.input, false);
+                    }
+                    InteractInputs[index] = interactInput;
+                    continue;
+                }
 
                 // After a grab-again drop, wait for grip release so the same press can't re-grab the pickup
                 if (interactInput.suppressGrabUntilRelease)
@@ -766,7 +778,7 @@ namespace Basis.Scripts.BasisSdk.Interactions
         private static bool HoverStillValid(BasisInteractableObject obj, BasisInput input)
         {
             if (!obj.InteractableEnabled) return false;
-            if (input.BasisUIRaycast.HadRaycastUITarget) return false;
+            if (obj.PointerClaimedByUI(input)) return false;
             if (!obj.Inputs.IsInputAdded(input)) return false;
             if (!input.TryGetRole(out BasisBoneTrackedRole role)) return false;
             if (!obj.Inputs.TryGetByRole(role, out BasisInputWrapper wrapper)) return false;

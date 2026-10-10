@@ -23,9 +23,7 @@ using UnityEngine.Jobs;
 public class BasisLocalEyeDriver
 {
 
-    [Header("Limits")]
-    [Tooltip("Max eye rotation away from forward, in degrees.")]
-    [Range(1f, 30f)] public float maxAngleDeg = 25f;
+    public static float MaxAngleDeg => BasisLocalEyeDriverData.MaxLookAngleDeg;
 
     [Header("Timing")]
     [Tooltip("How long a saccade takes (fast).")]
@@ -37,7 +35,6 @@ public class BasisLocalEyeDriver
 
     public static Transform leftEyeTransform;
     public static Transform rightEyeTransform;
-    private static Transform _headRef;
     public static BasisEyeCalibration calLeft;
     public static BasisEyeCalibration calRight;
     private static NativeArray<BasisEyeState> _state;
@@ -169,7 +166,6 @@ public class BasisLocalEyeDriver
 
         leftEyeTransform = References.LeftEye;
         rightEyeTransform = References.RightEye;
-        _headRef = References.head;
 
         _state = new NativeArray<BasisEyeState>(1, Allocator.Persistent);
         _state[0] = BasisEyeState.Create((uint)UnityEngine.Random.Range(1, int.MaxValue));
@@ -184,9 +180,9 @@ public class BasisLocalEyeDriver
         _eyeTransforms.Add(leftEyeTransform);
         _eyeTransforms.Add(rightEyeTransform);
 
-        // Per-eye calibration against head reference directions
-        calLeft = CalibrateOneEye(leftEyeTransform, _headRef);
-        calRight = CalibrateOneEye(rightEyeTransform, _headRef);
+        FacingFrame(References, out Vector3 facingForward, out Vector3 facingUp);
+        calLeft = CalibrateOneEye(leftEyeTransform, facingForward, facingUp);
+        calRight = CalibrateOneEye(rightEyeTransform, facingForward, facingUp);
 
         RecomputePersonality();
 
@@ -197,7 +193,10 @@ public class BasisLocalEyeDriver
         _prevGazeTarget = null;
         _prevHasGazeTarget = false;
         _gazeTargetChanged = false;
-        _prevHeadRot = BasisLocalCameraDriver.HeadRotation;
+        // The first avatar can finish loading before the camera driver has run once.
+        // HeadRotation is the default zero quaternion until that first camera tick;
+        // inverting it below would poison the persistent eye state with NaNs.
+        _prevHeadRot = SanitizeHeadRotation(BasisLocalCameraDriver.HeadRotation, quaternion.identity);
         _headDeltaYP = float2.zero;
         _winnerEyeRot = quaternion.identity;
         _selectAccumulator = SelectIntervalSeconds;
@@ -311,7 +310,7 @@ public class BasisLocalEyeDriver
         BasisEyeJob computeJob = new BasisEyeJob
         {
             dt = dt,
-            maxAngleDeg = maxAngleDeg,
+            maxAngleDeg = MaxAngleDeg,
             saccadeMin = saccadeTimeRange.x,
             saccadeMax = saccadeTimeRange.y,
             perEyeVarDeg = perEyeVarianceDeg,
@@ -378,7 +377,7 @@ public class BasisLocalEyeDriver
     private static void SelectGazeTarget(float dt)
     {
         float3 localHeadPos = BasisLocalCameraDriver.HeadPosition;
-        quaternion localHeadRot = BasisLocalCameraDriver.HeadRotation;
+        quaternion localHeadRot = SanitizeHeadRotation(BasisLocalCameraDriver.HeadRotation, _prevHeadRot);
         quaternion invLocalHeadRot = math.inverse(localHeadRot);
 
         // The job uses how much the head rotated to compensate the eye target.
@@ -395,7 +394,7 @@ public class BasisLocalEyeDriver
         if (_selectAccumulator >= SelectIntervalSeconds)
         {
             _selectAccumulator = 0f;
-            RescoreGazeTarget(localHeadPos, BasisLocalCameraDriver.HeadForward());
+            RescoreGazeTarget(localHeadPos, math.mul(localHeadRot, new float3(0f, 0f, 1f)));
         }
 
         ReprojectGaze(localHeadPos, invLocalHeadRot);
@@ -745,76 +744,58 @@ public class BasisLocalEyeDriver
         );
     }
 
-    private static readonly float3[] axes = new float3[]
-{
-            new float3( 1, 0, 0), new float3(-1, 0, 0),
-            new float3( 0, 1, 0), new float3( 0,-1, 0),
-            new float3( 0, 0, 1), new float3( 0, 0,-1)
-};
     /// <summary>
-    /// Auto-detect the eye bone's local forward/up axes by comparing its transformed local axes
-    /// to the head reference forward/up in world space.
+    /// Returns a normalized head rotation safe to invert. During boot the camera pose statics
+    /// have not necessarily received their first sample and therefore contain a zero quaternion.
     /// </summary>
-    internal static BasisEyeCalibration CalibrateOneEye(Transform eye, Transform refHead)
+    internal static quaternion SanitizeHeadRotation(quaternion rotation, quaternion fallback)
     {
-
-        float3 headF = refHead.forward;
-        float3 headU = refHead.up;
-
-        // Pick local axis that best matches head forward
-        int bestF = 0;
-        float bestFDot = -1e9f;
-        for (int Index = 0; Index < axes.Length; Index++)
+        float lengthSq = math.lengthsq(rotation.value);
+        if (math.all(math.isfinite(rotation.value)) && lengthSq > 1e-8f)
         {
-            float3 w = eye.TransformDirection((Vector3)axes[Index]);
-            float d = math.dot(math.normalizesafe(w), math.normalizesafe(headF));
-            if (d <= bestFDot)
-            {
-                continue;
-            }
-            bestFDot = d; bestF = Index;
+            return new quaternion(rotation.value * math.rsqrt(lengthSq));
         }
-        float3 fLocal = axes[bestF];
 
-        // Pick local axis (not colinear with forward) that best matches head up
-        int bestU = 0;
-        float bestUDot = -1e9f;
-        for (int Index = 0; Index < axes.Length; Index++)
+        float fallbackLengthSq = math.lengthsq(fallback.value);
+        if (math.all(math.isfinite(fallback.value)) && fallbackLengthSq > 1e-8f)
         {
-            if (Index == bestF)
-            {
-                continue;
-            }
-
-            if (math.abs(math.dot(axes[Index], fLocal)) > 0.9f)
-            {
-                continue; // reject colinear
-            }
-
-            float3 w = eye.TransformDirection((Vector3)axes[Index]);
-            float d = math.dot(math.normalizesafe(w), math.normalizesafe(headU));
-            if (d <= bestUDot)
-            {
-                continue;
-            }
-            bestUDot = d; bestU = Index;
+            return new quaternion(fallback.value * math.rsqrt(fallbackLengthSq));
         }
-        float3 uLocal = axes[bestU];
 
-        // Orthonormalize basis
-        fLocal = math.normalize(fLocal);
+        return quaternion.identity;
+    }
+
+    internal static void FacingFrame(BasisTransformMapping refs, out Vector3 forward, out Vector3 up)
+    {
+        if (refs.HasAnimatorRoot)
+        {
+            Quaternion rootRotation = refs.AnimatorRoot.rotation;
+            bool hasTposeFacing = refs.AvatarForwards.sqrMagnitude > 0.5f && refs.AvatarUpwards.sqrMagnitude > 0.5f;
+            forward = hasTposeFacing ? rootRotation * refs.AvatarForwards : refs.AnimatorRoot.forward;
+            up = hasTposeFacing ? rootRotation * refs.AvatarUpwards : refs.AnimatorRoot.up;
+            return;
+        }
+        if (refs.Hashead)
+        {
+            forward = refs.head.forward;
+            up = refs.head.up;
+            return;
+        }
+        forward = Vector3.forward;
+        up = Vector3.up;
+    }
+
+    internal static BasisEyeCalibration CalibrateOneEye(Transform eye, Vector3 facingForward, Vector3 facingUp)
+    {
+        quaternion invEye = math.inverse((quaternion)eye.rotation);
+        float3 fLocal = math.normalizesafe(math.mul(invEye, (float3)facingForward), new float3(0, 0, 1));
+        float3 uLocal = math.mul(invEye, (float3)facingUp);
         uLocal -= fLocal * math.dot(uLocal, fLocal);
         uLocal = math.normalizesafe(uLocal, new float3(0, 1, 0));
-
         float3 rLocal = math.normalizesafe(math.cross(uLocal, fLocal), new float3(1, 0, 0));
         uLocal = math.normalizesafe(math.cross(fLocal, rLocal), new float3(0, 1, 0));
-
-        // Build basis rotation: canonical (R,U,F) -> rig local (rLocal,uLocal,fLocal)
-        float3x3 m = new float3x3(rLocal, uLocal, fLocal);
-        quaternion basis = new quaternion(m);
-        quaternion inv = math.inverse(basis);
-
-        return new BasisEyeCalibration { basis = basis, invBasis = inv, initialRotation = eye.localRotation };
+        quaternion basis = new quaternion(new float3x3(rLocal, uLocal, fLocal));
+        return new BasisEyeCalibration { basis = basis, invBasis = math.inverse(basis), initialRotation = eye.localRotation };
     }
 
     #endregion

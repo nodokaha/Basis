@@ -166,7 +166,7 @@ namespace Basis.Network
                     }
                 };
                 var netClient = new NetworkClient();
-                var peer = netClient.StartClient(ConfigManager.Ip, ConfigManager.Port, readyMessage, _cachedPasswordBytes, CreateConfig(), manualMode: true);
+                var peer = netClient.StartClient(ConfigManager.Ip, ConfigManager.Port, readyMessage, _cachedPasswordBytes, ConfigManager.CompanyName, ConfigManager.ProductName, CreateConfig(), manualMode: true);
 
                 if (peer != null)
                 {
@@ -230,11 +230,15 @@ namespace Basis.Network
                     array = MovementSender.Generate(index).Message.array,
                     AdditionalAvatarDataSize = 0,
                     LinkedAvatarIndex = 0,
+                    // ReadyMessage.Serialize sizes the payload from this field and replaces a
+                    // mismatched array with a fresh zeroed one, so leaving it at the default 0
+                    // (VeryLow) rejoined the client with a blank pose.
+                    DataQualityLevel = (byte)BitQuality.High,
                 }
             };
 
             var netClient = new NetworkClient();
-            var peer = netClient.StartClient(ConfigManager.Ip, ConfigManager.Port, readyMessage, _cachedPasswordBytes, CreateConfig(), manualMode: true);
+            var peer = netClient.StartClient(ConfigManager.Ip, ConfigManager.Port, readyMessage, _cachedPasswordBytes, ConfigManager.CompanyName, ConfigManager.ProductName, CreateConfig(), manualMode: true);
 
             if (peer != null)
             {

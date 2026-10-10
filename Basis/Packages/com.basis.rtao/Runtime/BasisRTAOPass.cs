@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -17,6 +17,7 @@ namespace Basis.Rendering.RTAO
         public static readonly int AOSize = Shader.PropertyToID("_BasisRtaoAOSize");
         public static readonly int Size = Shader.PropertyToID("_BasisRtaoSize");
         public static readonly int Scale = Shader.PropertyToID("_BasisRtaoScale");
+        public static readonly int UseCameraNormals = Shader.PropertyToID("_BasisRtaoUseCameraNormals");
         public static readonly int Trace = Shader.PropertyToID("_BasisRtaoTrace");
         public static readonly int Bias = Shader.PropertyToID("_BasisRtaoBias");
         public static readonly int RayCount = Shader.PropertyToID("_BasisRtaoRayCount");
@@ -54,6 +55,8 @@ namespace Basis.Rendering.RTAO
         public static readonly int AccelStruct = Shader.PropertyToID("_BasisRtaoAccel");
         public static readonly int TraceMask = Shader.PropertyToID("_BasisRtaoTraceMask");
         public static readonly int ScreenParams = Shader.PropertyToID("_BasisRtaoScreenParams");
+        public static readonly int ScreenAxisX = Shader.PropertyToID("_BasisRtaoScreenAxisX");
+        public static readonly int ScreenAxisY = Shader.PropertyToID("_BasisRtaoScreenAxisY");
         public const string AccelStructName = "_BasisRtaoAccel";
     }
 
@@ -96,6 +99,14 @@ namespace Basis.Rendering.RTAO
         private readonly Matrix4x4[] previousViewProjection = new Matrix4x4[2];
         private readonly Vector4[] viewPlane = new Vector4[2];
         private readonly Vector4[] previousViewPlane = new Vector4[2];
+        // World-space direction of one texel step across the trace target, per eye - +x a column right,
+        // +y a row UP. Row order follows the unflipped projection, not the raster: the temporal pass
+        // reprojects with "clip.xy / w * 0.5 + 0.5" and no y flip, and history lands where the prepass
+        // wrote, so a larger row in these textures is a point higher in the world. The screen space
+        // estimator's horizon walk happens in texel space, and these are what let it build the slice
+        // plane each walk lies in.
+        private readonly Vector4[] screenAxisX = new Vector4[2];
+        private readonly Vector4[] screenAxisY = new Vector4[2];
 
         private BasisRTAOResources resources;
         private BasisRTAOContext context;
@@ -173,7 +184,7 @@ namespace Basis.Rendering.RTAO
                 return;
 
             lastReportedBackend = resolved;
-
+            /*
             switch (resolved)
             {
                 case BasisRTAOBackend.Hardware:
@@ -193,6 +204,7 @@ namespace Basis.Rendering.RTAO
                     Debug.LogWarning("[BasisRTAO] No usable backend; ambient occlusion is not running.");
                     break;
             }
+            */
         }
 
         public bool EnsureReady()
@@ -303,7 +315,7 @@ namespace Basis.Rendering.RTAO
         private class PrepassData
         {
             public Material material;
-            public TextureHandle position, normal, depth;
+            public TextureHandle position, normal, depth, cameraNormals;
         }
 
         private class TraceData
@@ -327,7 +339,7 @@ namespace Basis.Rendering.RTAO
             public ComputeShader shader;
             public int kernel;
             public TextureHandle position, normal, result;
-            public Vector4[] viewPlane;
+            public Vector4[] viewPlane, screenAxisX, screenAxisY;
             public Vector4 reference, trace, bias, size, screenParams;
             public int rayCount, viewCount, frameIndex, stereoCoherent, width, height;
         }
@@ -420,6 +432,12 @@ namespace Basis.Rendering.RTAO
                 Matrix4x4 view = cameraData.GetViewMatrix(sourceEye);
                 viewProjection[eye] = cameraData.GetProjectionMatrix(sourceEye) * view;
                 viewPlane[eye] = ViewPlaneOf(view);
+                // For a rotation the inverse is the transpose, so the world direction that lands on view +x
+                // is the view matrix's first ROW; likewise up. Rows 0 and 1 are pure rotation - Unity's
+                // right-handed flip lives on row 2 alone. The up row is NOT negated: these buffers are
+                // laid out in unflipped projection order (see the field comment), so +1 texel row is +view up.
+                screenAxisX[eye] = new Vector4(view.m00, view.m01, view.m02, 0f);
+                screenAxisY[eye] = new Vector4(view.m10, view.m11, view.m12, 0f);
             }
 
             BasisRTAOHistory.Entry historyEntry = history.Get(camera, traceSize.x, traceSize.y, viewCount, Time.frameCount);
@@ -429,7 +447,10 @@ namespace Basis.Rendering.RTAO
             previousViewProjection[1] = historyEntry.previousViewProjection[1];
             previousViewPlane[0] = historyEntry.previousViewPlane[0];
             previousViewPlane[1] = historyEntry.previousViewPlane[1];
-            bool hasHistory = historyEntry.framesRendered > 0;
+            bool resetHistory = camera != null && camera.TryGetComponent(out UniversalAdditionalCameraData additionalCameraData) && additionalCameraData.resetHistory;
+            bool hasHistory = historyEntry.framesRendered > 0 && !resetHistory;
+            if (resetHistory)
+                historyEntry.framesRendered = 0;
 
             Vector4 referenceVector = new Vector4(reference.x, reference.y, reference.z, 0f);
             Vector4 fullSize = new Vector4(fullWidth, fullHeight, 1f / fullWidth, 1f / fullHeight);
@@ -457,7 +478,11 @@ namespace Basis.Rendering.RTAO
             else
             {
                 float projectionScale = BasisRTAOTracing.ProjectionScale(cameraData.GetProjectionMatrix(0), traceSize.y, camera.orthographic);
-                RecordScreenSpace(renderGraph, positionTexture, normalTexture, rawTexture, referenceVector, traceSizeVector, traceSize, viewCount, projectionScale);
+                // An orthographic camera projects the radius to the same pixel count at every depth, so it
+                // carries its own scale - ProjectionScale is zero there, which is also how the kernel tells
+                // the two apart.
+                float orthographicScale = camera.orthographic ? traceSize.y / Mathf.Max(0.001f, camera.orthographicSize * 2f) : 0f;
+                RecordScreenSpace(renderGraph, positionTexture, normalTexture, rawTexture, referenceVector, traceSizeVector, traceSize, viewCount, projectionScale, orthographicScale);
             }
             RecordTemporal(renderGraph, positionTexture, normalTexture, rawTexture, historyIn, historyDepthIn, historyOut, historyDepthOut,
                 referenceVector, traceSizeVector, traceSize, viewCount, hasHistory);
@@ -528,15 +553,20 @@ namespace Basis.Rendering.RTAO
                 prepassMaterial.SetVector(BasisRTAOShaderIds.FullSize, fullSize);
                 prepassMaterial.SetVector(BasisRTAOShaderIds.Composite, composite);
                 prepassMaterial.SetInteger(BasisRTAOShaderIds.Scale, scale);
+                bool hasCameraNormals = resourceData.cameraNormalsTexture.IsValid();
+                prepassMaterial.SetInteger(BasisRTAOShaderIds.UseCameraNormals, hasCameraNormals ? 1 : 0);
 
                 data.material = prepassMaterial;
                 data.position = position;
                 data.normal = normal;
                 data.depth = resourceData.cameraDepthTexture;
+                data.cameraNormals = hasCameraNormals ? resourceData.cameraNormalsTexture : TextureHandle.nullHandle;
 
                 builder.SetRenderAttachment(position, 0, AccessFlags.WriteAll);
                 builder.SetRenderAttachment(normal, 1, AccessFlags.WriteAll);
                 builder.UseTexture(data.depth, AccessFlags.Read);
+                if (data.cameraNormals.IsValid())
+                    builder.UseTexture(data.cameraNormals, AccessFlags.Read);
                 builder.AllowPassCulling(false);
 
                 builder.SetRenderFunc(static (PrepassData data, RasterGraphContext ctx) =>
@@ -617,7 +647,7 @@ namespace Basis.Rendering.RTAO
         }
 
         private void RecordScreenSpace(RenderGraph renderGraph, TextureHandle position, TextureHandle normal, TextureHandle result,
-            Vector4 reference, Vector4 size, Vector2Int traceSize, int viewCount, float projectionScale)
+            Vector4 reference, Vector4 size, Vector2Int traceSize, int viewCount, float projectionScale, float orthographicScale)
         {
             using (IComputeRenderGraphBuilder builder = renderGraph.AddComputePass<ScreenSpaceData>("BasisRTAO Screen Space", out ScreenSpaceData data, profilingSampler))
             {
@@ -627,11 +657,13 @@ namespace Basis.Rendering.RTAO
                 data.normal = normal;
                 data.result = result;
                 data.viewPlane = viewPlane;
+                data.screenAxisX = screenAxisX;
+                data.screenAxisY = screenAxisY;
                 data.reference = reference;
                 data.trace = new Vector4(settings.raysPerPixel, settings.radius, settings.distanceFalloff, 0f);
                 data.bias = new Vector4(settings.normalBias, settings.distanceBias, settings.noiseCellSize, 0f);
                 data.size = size;
-                data.screenParams = new Vector4(projectionScale, ScreenSpaceMaxRadiusPixels, 2f, 0f);
+                data.screenParams = new Vector4(projectionScale, ScreenSpaceMaxRadiusPixels, 2f, orthographicScale);
                 data.rayCount = Mathf.Max(4, settings.raysPerPixel * 4);
                 data.viewCount = viewCount;
                 data.frameIndex = frameIndex;
@@ -651,6 +683,8 @@ namespace Basis.Rendering.RTAO
                     cmd.SetComputeTextureParam(data.shader, data.kernel, BasisRTAOShaderIds.NormalTex, data.normal);
                     cmd.SetComputeTextureParam(data.shader, data.kernel, BasisRTAOShaderIds.ResultTex, data.result);
                     cmd.SetComputeVectorArrayParam(data.shader, BasisRTAOShaderIds.ViewPlane, data.viewPlane);
+                    cmd.SetComputeVectorArrayParam(data.shader, BasisRTAOShaderIds.ScreenAxisX, data.screenAxisX);
+                    cmd.SetComputeVectorArrayParam(data.shader, BasisRTAOShaderIds.ScreenAxisY, data.screenAxisY);
                     cmd.SetComputeVectorParam(data.shader, BasisRTAOShaderIds.Reference, data.reference);
                     cmd.SetComputeVectorParam(data.shader, BasisRTAOShaderIds.Trace, data.trace);
                     cmd.SetComputeVectorParam(data.shader, BasisRTAOShaderIds.Bias, data.bias);

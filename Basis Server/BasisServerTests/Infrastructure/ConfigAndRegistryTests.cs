@@ -82,6 +82,7 @@ public class ServerConfigurationDefaultsTests
         Assert.Equal(4296, cfg.SetPort);
         Assert.Equal("Basis Server", cfg.ServerName);
         Assert.Equal("", cfg.ServerMotd);
+        Assert.True(Guid.TryParseExact(cfg.ServerUUID, "N", out _));
         Assert.True(cfg.EnableStatistics);
         Assert.True(cfg.HasFileSupport);
         Assert.Equal("localhost", cfg.HealthCheckHost);
@@ -132,6 +133,14 @@ public class ServerConfigurationDefaultsTests
         Assert.Equal(25f, cfg.MaxHearingRangeMeters);
         Assert.Equal(0.1f, cfg.MinAvatarEyeHeightMeters);
         Assert.Equal(100f, cfg.MaxAvatarEyeHeightMeters);
+        // 0 fields = the server dictates no movement values; a fresh instance must never ship a
+        // locomotion policy that silently overrides what players and worlds ask for.
+        Assert.Equal(0, cfg.LocomotionPolicyFields);
+        Assert.Equal(1f, cfg.LocomotionPolicyJumpHeight);
+        Assert.Equal(2.5f, cfg.LocomotionPolicyWalkSpeed);
+        Assert.Equal(4f, cfg.LocomotionPolicyRunSpeed);
+        Assert.Equal(-9.81f, cfg.LocomotionPolicyGravity);
+        Assert.Equal(0, cfg.LocomotionPolicyMode);
         Assert.False(cfg.DisallowHeadless);
     }
 
@@ -174,7 +183,9 @@ public class ServerConfigurationDefaultsTests
         // 11: added the population-drop memory reclaim settings.
         // 12: added BSRSendPhaseBudgetPercent, the send pass's share of the reduction tick.
         // 13: added LogConnectionHandshake; the per-connection auth chatter is now off by default.
-        Assert.Equal(13, Configuration.CurrentConfigVersion);
+        // 14: added CompanyName and ProductName, the client identity a connection must report.
+        // 15: added the persistent application-level ServerUUID.
+        Assert.Equal(15, Configuration.CurrentConfigVersion);
         Assert.Equal(0, new Configuration().ConfigVersion);
         Assert.Equal("config", Configuration.ConfigFolderName);
         Assert.Equal("logs", Configuration.LogsFolderName);
@@ -207,8 +218,10 @@ public class ConfigurationPersistenceTests
         Configuration loaded = Configuration.LoadFromXml(path);
 
         Assert.True(File.Exists(path));
-        ConfigTestSupport.AssertFieldsEqual(new Configuration(), loaded, nameof(Configuration.ConfigVersion));
+        ConfigTestSupport.AssertFieldsEqual(new Configuration(), loaded,
+            nameof(Configuration.ConfigVersion), nameof(Configuration.ServerUUID));
         Assert.Equal(Configuration.CurrentConfigVersion, loaded.ConfigVersion);
+        Assert.True(Guid.TryParseExact(loaded.ServerUUID, "N", out _));
 
         string xml = File.ReadAllText(path);
         Assert.Contains("<!--", xml);
@@ -218,6 +231,19 @@ public class ConfigurationPersistenceTests
         string sidecar = Path.Combine(dir.Path, BasisTransportConfigStore.TransportsFolderName,
             BasisNetworkStackRegistry.LiteNetLibId + ".xml");
         Assert.True(File.Exists(sidecar));
+    }
+
+    [Fact]
+    public void LoadFromXml_GeneratedServerUuid_PersistsAcrossRestarts()
+    {
+        using var dir = new ConfigTestSupport.TempDir();
+        string path = dir.File("config.xml");
+
+        Configuration first = Configuration.LoadFromXml(path);
+        Configuration second = Configuration.LoadFromXml(path);
+
+        Assert.True(Guid.TryParseExact(first.ServerUUID, "N", out _));
+        Assert.Equal(first.ServerUUID, second.ServerUUID);
     }
 
     [Fact]
@@ -886,7 +912,7 @@ public class ServerMessageRegistryBindingTableTests
     {
         BasisNetworkCommons.AuthIdentityChannel,
         BasisNetworkCommons.VoiceChannel,
-        BasisNetworkCommons.ShoutVoiceChannel,
+        BasisNetworkCommons.AnnounceVoiceChannel,
         BasisNetworkCommons.AudioRecipientsChannel,
         BasisNetworkCommons.PlayerAvatarHighChannel,
         BasisNetworkCommons.PlayerAvatarHighAdditionalChannel,

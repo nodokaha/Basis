@@ -101,6 +101,12 @@ namespace Basis.Scripts.BasisSdk.Interactions
             PrimaryButtonGetState = 7,
             SystemOrMenuButton = 8,
             GripButton = 9,
+            PrimaryButtonTouch = 10,
+            SecondaryButtonTouch = 11,
+            Primary2DAxisTouch = 12,
+            Secondary2DAxisTouch = 13,
+            TriggerTouch = 14,
+            ThumbrestTouch = 15,
         }
         public bool HasState(BasisInputState state, BasisInputKey Key)
         {
@@ -108,11 +114,11 @@ namespace Basis.Scripts.BasisSdk.Interactions
             {
                 case BasisInputKey.Trigger:
                     // Fire when main trigger is fully pressed
-                    return state.Trigger >= 0.9f;
+                    return state.Trigger >= BasisTriggerPressure.InteractableObjectIsTriggered;
 
                 case BasisInputKey.SecondaryTrigger:
                     // Fire when secondary trigger is fully pressed
-                    return state.SecondaryTrigger >= 0.9f;
+                    return state.SecondaryTrigger >= BasisTriggerPressure.InteractableObjectIsSecondaryTriggered;
 
                 case BasisInputKey.Primary2DAxis:
                     // Axis has state if it's non-zero (already deadzoned in BasisInputState)
@@ -138,6 +144,24 @@ namespace Basis.Scripts.BasisSdk.Interactions
 
                 case BasisInputKey.GripButton:
                     return state.GripButton;
+
+                case BasisInputKey.PrimaryButtonTouch:
+                    return state.PrimaryButtonTouch;
+
+                case BasisInputKey.SecondaryButtonTouch:
+                    return state.SecondaryButtonTouch;
+
+                case BasisInputKey.Primary2DAxisTouch:
+                    return state.Primary2DAxisTouch;
+
+                case BasisInputKey.Secondary2DAxisTouch:
+                    return state.Secondary2DAxisTouch;
+
+                case BasisInputKey.TriggerTouch:
+                    return state.TriggerTouch;
+
+                case BasisInputKey.ThumbrestTouch:
+                    return state.ThumbrestTouch;
 
                 default:
                     BasisDebug.LogError($"Unsupported BasisInputKey: {InputKey}");
@@ -544,7 +568,7 @@ namespace Basis.Scripts.BasisSdk.Interactions
             return input.CurrentInputState.GripButton ||
                 input.TryGetRole(out var role) &&
                 role == Basis.Scripts.TransformBinders.BoneControl.BasisBoneTrackedRole.CenterEye &&
-                input.CurrentInputState.Trigger == 1;
+                input.CurrentInputState.Trigger >= BasisTriggerPressure.InteractableObject;
         }
 
         /// <summary>
@@ -579,7 +603,7 @@ namespace Basis.Scripts.BasisSdk.Interactions
             }
 
             // Did we hit UI?
-            if (input.BasisUIRaycast.HadRaycastUITarget)
+            if (PointerClaimedByUI(input))
             {
             //    BasisDebug.Log("UI Raycast target was hit", BasisDebug.LogTag.System);
                 return false;
@@ -724,6 +748,11 @@ namespace Basis.Scripts.BasisSdk.Interactions
         public virtual bool IsInfluencable(BasisInput input)
         {
             return InteractableEnabled && (CanHover(input) || CanInteract(input));
+        }
+
+        public virtual bool PointerClaimedByUI(BasisInput input)
+        {
+            return input.BasisUIRaycast != null && input.BasisUIRaycast.HadRaycastUITarget;
         }
 
         /// <summary>

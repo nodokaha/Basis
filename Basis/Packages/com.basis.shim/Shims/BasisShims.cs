@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.Events;
 using Cilbox;
+using UrlSecurity = Basis.Scripts.Common.BasisUrlSecurity;
 
 namespace Basis
 {
@@ -24,6 +25,23 @@ namespace Basis
 
 	public class SafeUtil
 	{
+		public static int GetExecutionBudgetUs( object self )
+		{
+			return (int)((CilboxProxy)self).box.timeoutLengthUs;
+		}
+
+		public static int GetRemainingExecutionBudgetUs( object self )
+		{
+			Cilbox.Cilbox box = ((CilboxProxy)self).box;
+			long remainingTicks = box.interpreterAccountingDropDead - System.Diagnostics.Stopwatch.GetTimestamp();
+			return remainingTicks > 0 ? (int)(remainingTicks / box.interpreterTicksInUs) : 0;
+		}
+
+		public static int GetLastFrameExecutionUs( object self )
+		{
+			return (int)((CilboxProxy)self).box.usSpentLastFrame;
+		}
+
 		public static void AddEventTrigger(Component target, EventTriggerType eventType, UnityAction<BaseEventData> callback)
 		{
 			if (target == null || callback == null)
@@ -132,13 +150,13 @@ namespace Basis
 		{
 			if( callback == null ) return;
 
-			if( !BasisMediaPlayerSecurity.IsUrlAllowed( stringUrl, out string reason ) )
+			if( !UrlSecurity.IsHttpUrlAllowed( stringUrl, out string reason ) )
 			{
 				callback( new IBasisImageDownload( null, null, "Security Failure: " + reason ) );
 				return;
 			}
 
-			string dnsReason = await BasisMediaPlayerSecurity.ValidateResolvedHostAsync( stringUrl );
+			string dnsReason = await UrlSecurity.ValidateResolvedHostAsync( stringUrl );
 			if( dnsReason != null )
 			{
 				callback( new IBasisImageDownload( null, null, "Security Failure: " + dnsReason ) );
@@ -268,9 +286,7 @@ namespace Basis
 								BasisTrustedUrls.Add( uri.Scheme + "://" + uri.Host + "/*" );
 								break;
 							case BasisMenuURLPromptPanel.RememberChoiceScope.Domain:
-								string[] parts = uri.Host.Split( '.' );
-								string domain = parts.Length >= 2 ? parts[parts.Length - 2] + "." + parts[parts.Length - 1] : uri.Host;
-								BasisTrustedUrls.Add( uri.Scheme + "://*." + domain + "/*" );
+								BasisTrustedUrls.AddDomain( uri );
 								break;
 						}
 					}
@@ -296,13 +312,13 @@ namespace Basis
 		{
 			if( callback == null ) return;
 
-			if( !BasisMediaPlayerSecurity.IsUrlAllowed( stringUrl, out string reason ) )
+			if( !UrlSecurity.IsHttpUrlAllowed( stringUrl, out string reason ) )
 			{
 				callback( new IBasisStringDownload( null, "Security Failure: " + reason ) );
 				return;
 			}
 
-			string dnsReason = await BasisMediaPlayerSecurity.ValidateResolvedHostAsync( stringUrl );
+			string dnsReason = await UrlSecurity.ValidateResolvedHostAsync( stringUrl );
 			if( dnsReason != null )
 			{
 				callback( new IBasisStringDownload( null, "Security Failure: " + dnsReason ) );
@@ -342,35 +358,5 @@ namespace Basis
 		}
 	}
 
-
-
-
-#if false
-// If we ever allow raw.
-	public class BasisImageDownloader
-	{
-		public void DownloadImage( BasisUrl stringUrl, Action callback, TextureInfo rgbInfo)
-		{
-			UnityWebRequest www = UnityWebRequest.Get( stringUrl.Get() );
-			UnityWebRequestAsyncOperation req = www.SendWebRequest();
-
-			bool bCompleted = false;
-
-			req.completed += (AsyncOperation obj) => {
-				if( !bCompleted )
-				{
-					bCompleted = true;
-					DownloadHandler dh = www.downloadHandler;
-					callback( www.result == UnityWebRequest.Result.Success, dh.error, dh.GetData() );
-				}
-			};
-
-			if( !bCompleted && req.isDone )
-			{
-				req.completed( null );
-			}
-		}
-	};
-#endif
 
 }
