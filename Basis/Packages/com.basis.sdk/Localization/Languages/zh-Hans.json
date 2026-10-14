@@ -72,6 +72,16 @@
     { "key": "sdk.commonInspector.contentGroupId.generate.tooltip", "value": "为此内容分配一个全新的 ID，使以后的上传不再与旧版本归并。" },
     { "key": "sdk.commonInspector.contentGroupId.copy", "value": "复制" },
     { "key": "sdk.commonInspector.contentGroupId.copy.tooltip", "value": "将该 ID 复制到剪贴板，例如以便在其他项目中重复使用。" },
+    { "key": "sdk.commonInspector.authorship.foldout", "value": "作者与许可证" },
+    { "key": "sdk.commonInspector.authorship.help", "value": "可选。保存在 .BEE 文件中，并按此处填写的原样显示在项目详情中供用户查看。留空的字段不会显示，但作者留空时会使用你本地的 DID 密钥（如有）。" },
+    { "key": "sdk.commonInspector.authorship.author", "value": "作者" },
+    { "key": "sdk.commonInspector.authorship.author.tooltip", "value": "此内容的制作者。可以填写多个名字。" },
+    { "key": "sdk.commonInspector.authorship.contact", "value": "联系方式" },
+    { "key": "sdk.commonInspector.authorship.contact.tooltip", "value": "别人联系你或查看你更多作品的地方，例如网站或社交媒体主页。" },
+    { "key": "sdk.commonInspector.authorship.license", "value": "许可证" },
+    { "key": "sdk.commonInspector.authorship.license.tooltip", "value": "此内容的共享条款，例如“保留所有权利”或“CC BY 4.0”。" },
+    { "key": "sdk.commonInspector.authorship.credits", "value": "致谢" },
+    { "key": "sdk.commonInspector.authorship.credits.tooltip", "value": "此内容所用他人作品的署名，例如基础模型、贴图、着色器或音效。" },
     { "key": "sdk.commonInspector.buildOptions.foldout", "value": "AssetBundle 构建选项" },
     { "key": "sdk.commonInspector.useCustomPassword", "value": "使用自定义密码" },
     { "key": "sdk.commonInspector.password", "value": "密码" },
@@ -473,7 +483,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "每次构建时询问" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "始终使用 IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "始终使用 Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "记住 Windows 和 macOS 构建的 IL2CPP/Mono 选择，这样就不会每次都询问你。强制平台不受影响：Android 和 iOS 始终使用 IL2CPP，Linux 始终使用 Mono。在构建提示中选择后端也会更新此设置。" },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "始终使用 CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "记住 Windows 和 macOS 构建的 IL2CPP/Mono/CoreCLR 选择，这样就不会每次都询问你。强制平台不受影响：Android 和 iOS 始终使用 IL2CPP，Linux 始终使用 CoreCLR (ARM64: IL2CPP)。在构建提示中选择后端也会更新此设置。" },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "平台与质量" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +887,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "该类继承了网络 behaviour。替换它的代理并不是，因此那些重写永远不会触发——请改用网络 shim。" },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "定义了代理从不转发的 Unity 消息，因此它们永远不会运行：{0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "返回了 IEnumerator，但沙箱中没有协程：{0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "定义了 OnEnable。第一次会丢失，因此一次性初始化应放在 Start。" }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "定义了 OnEnable。第一次会丢失，因此一次性初始化应放在 Start。" },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "打开网页" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "请玩家在浏览器中打开一个页面。玩家总能看到地址并自行决定；只有在玩家刚使用过此世界或道具后才有效，头像中永远无法使用，回调会告知页面是否已打开。Application.OpenURL 也会经过同样的确认。" }
   ]
 }

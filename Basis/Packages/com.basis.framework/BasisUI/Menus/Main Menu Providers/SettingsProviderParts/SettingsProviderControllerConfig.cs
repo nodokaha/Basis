@@ -252,6 +252,12 @@ public static class SettingsProviderControllerConfig
                 toggleFingerTouchHaptics.Descriptor.SetTooltip(BasisLocalization.Get("settings.general.fingerTouch.haptics.tooltip"));
                 fingerTouchTuning.Add(toggleFingerTouchHaptics.Descriptor);
 
+                PanelToggle toggleFingerTouchGizmo = SettingsProvider.AddDeveloperGizmoToggle(group, "settings.developer.fingerTouch", BasisSettingsDefaults.GizmoFingerTouch);
+                if (toggleFingerTouchGizmo != null)
+                {
+                    fingerTouchTuning.Add(toggleFingerTouchGizmo.Descriptor);
+                }
+
                 toggleDisableVRFingerTouch.OnValueChanged += _ =>
                 {
                     ApplyFingerTouchTuningVisibility();
@@ -495,6 +501,7 @@ public static class SettingsProviderControllerConfig
         BasisSettingsDefaults.FingerTouchReleaseDistance.ResetToDefault();
         BasisSettingsDefaults.FingerTouchScrollSensitivity.ResetToDefault();
         BasisSettingsDefaults.FingerTouchHaptics.ResetToDefault();
+        BasisSettingsDefaults.GizmoFingerTouch.ResetToDefault();
         BasisSettingsDefaults.UIClickPressThreshold.ResetToDefault();
         BasisSettingsDefaults.UIClickReleaseThreshold.ResetToDefault();
         BasisSettingsDefaults.DepthOfFieldThreshold.ResetToDefault();
@@ -530,13 +537,14 @@ public static class SettingsProviderControllerConfig
     private static void BuildBindingsUI(RectTransform container)
     {
         var roles = (BasisBoneTrackedRole[])Enum.GetValues(typeof(BasisBoneTrackedRole));
-        var roleNames = roles.Select(r => PrettyEnumName(r.ToString())).ToArray();
+        var roleNames = roles.Select(BodyRoleLabel).ToArray();
 
         var actions = ((ActionId[])Enum.GetValues(typeof(ActionId)))
             .Where(a => a != ActionId.Count)
             .ToArray();
 
         var actionNames = actions.Select(a => PrettyEnumName(a.ToString())).ToList();
+        var actionKeys = actions.Select(a => "settings.controls.actionId." + LowerFirst(a.ToString())).ToList();
 
         var selectorGroup = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, container);
         selectorGroup.SetTitle(string.Format(BasisLocalization.Get("settings.controller.selectAction.title"), BasisDeviceManagement.StaticCurrentMode));
@@ -545,7 +553,7 @@ public static class SettingsProviderControllerConfig
         PanelDropdown actionDropdown = PanelDropdown.CreateNewEntry(selectorGroup.ContentParent);
         actionDropdown.Descriptor.SetTitle(BasisLocalization.Get("settings.controls.action"));
         actionDropdown.Descriptor.SetTooltip(BasisLocalization.Get("settings.controls.action.tooltip"));
-        actionDropdown.AssignEntries(actionNames);
+        actionDropdown.AssignLocalizedEntries(actionNames, actionKeys);
 
         var rolesGroup = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, container);
         rolesGroup.SetTitle(BasisLocalization.Get("settings.controls.roles"));
@@ -602,6 +610,8 @@ public static class SettingsProviderControllerConfig
 
         updatingUI = false;
     }
+    public static string BodyRoleLabel(BasisBoneTrackedRole role) => BasisLocalization.Get("ui.bodyRole." + LowerFirst(role.ToString()));
+    private static string LowerFirst(string value) => string.IsNullOrEmpty(value) ? value : char.ToLowerInvariant(value[0]) + value.Substring(1);
     private static string PrettyEnumName(string raw)
     {
         if (string.IsNullOrEmpty(raw)) { return raw; }

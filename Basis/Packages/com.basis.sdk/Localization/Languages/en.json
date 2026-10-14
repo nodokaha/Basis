@@ -73,6 +73,16 @@
     { "key": "sdk.commonInspector.contentGroupId.generate.tooltip", "value": "Give this content a fresh id, so future uploads no longer stack with older ones." },
     { "key": "sdk.commonInspector.contentGroupId.copy", "value": "Copy" },
     { "key": "sdk.commonInspector.contentGroupId.copy.tooltip", "value": "Copy the id to the clipboard, e.g. to reuse it in another project." },
+    { "key": "sdk.commonInspector.authorship.foldout", "value": "Author & License" },
+    { "key": "sdk.commonInspector.authorship.help", "value": "Optional. Stored inside the .BEE file and shown to users in the item's details exactly as written here. Empty fields are hidden, except Author, which falls back to your local DID key when there is one." },
+    { "key": "sdk.commonInspector.authorship.author", "value": "Author" },
+    { "key": "sdk.commonInspector.authorship.author.tooltip", "value": "Who made this content. Several names are fine." },
+    { "key": "sdk.commonInspector.authorship.contact", "value": "Contact" },
+    { "key": "sdk.commonInspector.authorship.contact.tooltip", "value": "Where people can reach you or find more of your work, such as a website or social profile." },
+    { "key": "sdk.commonInspector.authorship.license", "value": "License" },
+    { "key": "sdk.commonInspector.authorship.license.tooltip", "value": "The terms this content is shared under, such as “All Rights Reserved” or “CC BY 4.0”." },
+    { "key": "sdk.commonInspector.authorship.credits", "value": "Credits" },
+    { "key": "sdk.commonInspector.authorship.credits.tooltip", "value": "Credit for work by others that this content uses, such as base models, textures, shaders or sounds." },
     { "key": "sdk.commonInspector.buildOptions.foldout", "value": "Build AssetBundle Options" },
     { "key": "sdk.commonInspector.useCustomPassword", "value": "Use Custom Password" },
     { "key": "sdk.commonInspector.password", "value": "Password" },
@@ -477,7 +487,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "Ask each build" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "Always IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "Always Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Remembers the IL2CPP/Mono answer for Windows and macOS builds so you’re not asked every time. Forced platforms are unaffected: Android and iOS always use IL2CPP, Linux always uses Mono. Choosing a backend in the build prompt also updates this setting." },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "Always CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Remembers the IL2CPP/Mono/CoreCLR answer for Windows and macOS builds so you’re not asked every time. Forced platforms are unaffected: Android and iOS always use IL2CPP, Linux always uses CoreCLR (ARM64: IL2CPP). Choosing a backend in the build prompt also updates this setting." },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "Platform & Quality" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -882,6 +893,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "The class inherits a network behaviour. The proxy that replaces it is not one, so those overrides never fire — attach the network shim instead." },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "Defines Unity messages the proxy never forwards, so they will never run: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "Returns IEnumerator, but the sandbox has no coroutines: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Defines OnEnable. The first one is dropped, so one-time setup belongs in Start." }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Defines OnEnable. The first one is dropped, so one-time setup belongs in Start." },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "Opening a web page" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "Asks the player to open a page in their browser. The player always sees the address and decides; it only works right after they used this world or prop, never from an avatar, and the callback says whether it opened. Application.OpenURL goes through the same question." }
   ]
 }

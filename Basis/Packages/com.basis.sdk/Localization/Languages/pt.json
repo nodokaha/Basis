@@ -72,6 +72,16 @@
     { "key": "sdk.commonInspector.contentGroupId.generate.tooltip", "value": "Dá a este conteúdo um novo id, para que futuros uploads não se agrupem mais com os antigos." },
     { "key": "sdk.commonInspector.contentGroupId.copy", "value": "Copiar" },
     { "key": "sdk.commonInspector.contentGroupId.copy.tooltip", "value": "Copia o id para a área de transferência, por exemplo para reutilizá-lo em outro projeto." },
+    { "key": "sdk.commonInspector.authorship.foldout", "value": "Autor e licença" },
+    { "key": "sdk.commonInspector.authorship.help", "value": "Opcional. Fica armazenado dentro do arquivo .BEE e é mostrado aos usuários nos detalhes do item exatamente como está escrito aqui. Campos vazios ficam ocultos, exceto Autor, que usa sua chave DID local quando existir." },
+    { "key": "sdk.commonInspector.authorship.author", "value": "Autor" },
+    { "key": "sdk.commonInspector.authorship.author.tooltip", "value": "Quem criou este conteúdo. Pode colocar vários nomes." },
+    { "key": "sdk.commonInspector.authorship.contact", "value": "Contato" },
+    { "key": "sdk.commonInspector.authorship.contact.tooltip", "value": "Onde as pessoas podem falar com você ou encontrar mais do seu trabalho, como um site ou perfil em redes sociais." },
+    { "key": "sdk.commonInspector.authorship.license", "value": "Licença" },
+    { "key": "sdk.commonInspector.authorship.license.tooltip", "value": "Os termos sob os quais este conteúdo é compartilhado, como “Todos os direitos reservados” ou “CC BY 4.0”." },
+    { "key": "sdk.commonInspector.authorship.credits", "value": "Créditos" },
+    { "key": "sdk.commonInspector.authorship.credits.tooltip", "value": "Créditos pelo trabalho de outras pessoas usado neste conteúdo, como modelos base, texturas, shaders ou sons." },
     { "key": "sdk.commonInspector.buildOptions.foldout", "value": "Opções de build do AssetBundle" },
     { "key": "sdk.commonInspector.useCustomPassword", "value": "Usar senha personalizada" },
     { "key": "sdk.commonInspector.password", "value": "Senha" },
@@ -473,7 +483,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "Perguntar a cada build" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "Sempre IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "Sempre Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Lembra a resposta IL2CPP/Mono para builds de Windows e macOS para que você não seja perguntado toda vez. Plataformas forçadas não são afetadas: Android e iOS sempre usam IL2CPP, Linux sempre usa Mono. Escolher um backend no prompt da build também atualiza esta configuração." },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "Sempre CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Lembra a resposta IL2CPP/Mono/CoreCLR para builds de Windows e macOS para que você não seja perguntado toda vez. Plataformas forçadas não são afetadas: Android e iOS sempre usam IL2CPP, Linux sempre usa CoreCLR (ARM64: IL2CPP). Escolher um backend no prompt da build também atualiza esta configuração." },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "Plataforma e Qualidade" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +887,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "A classe herda de um behaviour de rede. O proxy que a substitui não é um, então esses overrides nunca disparam — anexe o shim de rede." },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "Define mensagens do Unity que o proxy nunca encaminha, então elas nunca vão rodar: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "Retorna IEnumerator, mas o ambiente não tem corrotinas: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Define OnEnable. O primeiro é perdido, então a inicialização única vai em Start." }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Define OnEnable. O primeiro é perdido, então a inicialização única vai em Start." },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "Abrir uma página da web" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "Pede ao jogador para abrir uma página no navegador. O jogador sempre vê o endereço e decide; só funciona logo depois que ele usou este mundo ou prop, nunca a partir de um avatar, e o callback informa se a página abriu. Application.OpenURL passa pela mesma pergunta." }
   ]
 }

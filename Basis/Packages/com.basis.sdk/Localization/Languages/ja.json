@@ -72,6 +72,16 @@
     { "key": "sdk.commonInspector.contentGroupId.generate.tooltip", "value": "このコンテンツに新しい ID を付与し、今後のアップロードが以前のものとまとめられないようにします。" },
     { "key": "sdk.commonInspector.contentGroupId.copy", "value": "コピー" },
     { "key": "sdk.commonInspector.contentGroupId.copy.tooltip", "value": "ID をクリップボードにコピーします（例: 別のプロジェクトで再利用する場合など）。" },
+    { "key": "sdk.commonInspector.authorship.foldout", "value": "作者とライセンス" },
+    { "key": "sdk.commonInspector.authorship.help", "value": "任意です。.BEE ファイル内に保存され、アイテムの詳細でここに書いたとおりにユーザーへ表示されます。空欄の項目は表示されませんが、作者が空欄の場合はローカルの DID キーがあればそれが使われます。" },
+    { "key": "sdk.commonInspector.authorship.author", "value": "作者" },
+    { "key": "sdk.commonInspector.authorship.author.tooltip", "value": "このコンテンツを作った人です。複数の名前でもかまいません。" },
+    { "key": "sdk.commonInspector.authorship.contact", "value": "連絡先" },
+    { "key": "sdk.commonInspector.authorship.contact.tooltip", "value": "連絡を取ったり他の作品を見たりできる場所です。Web サイトや SNS のプロフィールなど。" },
+    { "key": "sdk.commonInspector.authorship.license", "value": "ライセンス" },
+    { "key": "sdk.commonInspector.authorship.license.tooltip", "value": "このコンテンツを共有する条件です。「All Rights Reserved」や「CC BY 4.0」など。" },
+    { "key": "sdk.commonInspector.authorship.credits", "value": "クレジット" },
+    { "key": "sdk.commonInspector.authorship.credits.tooltip", "value": "このコンテンツで使っている他の人の制作物のクレジットです。ベースモデル、テクスチャ、シェーダ、サウンドなど。" },
     { "key": "sdk.commonInspector.buildOptions.foldout", "value": "AssetBundle のビルドオプション" },
     { "key": "sdk.commonInspector.useCustomPassword", "value": "カスタムパスワードを使用" },
     { "key": "sdk.commonInspector.password", "value": "パスワード" },
@@ -473,7 +483,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "ビルドごとに確認" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "常にIL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "常にMono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "WindowsとmacOSのビルドについてIL2CPP/Monoの回答を記憶し、毎回確認されないようにします。強制されるプラットフォームは影響を受けません。AndroidとiOSは常にIL2CPPを、Linuxは常にMonoを使用します。ビルドのプロンプトでバックエンドを選択すると、この設定も更新されます。" },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "常にCoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "WindowsとmacOSのビルドについてIL2CPP/Mono/CoreCLRの回答を記憶し、毎回確認されないようにします。強制されるプラットフォームは影響を受けません。AndroidとiOSは常にIL2CPPを、Linuxは常にCoreCLR (ARM64: IL2CPP)を使用します。ビルドのプロンプトでバックエンドを選択すると、この設定も更新されます。" },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "プラットフォームと品質" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +887,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "クラスがネットワーク behaviour を継承しています。置き換わるプロキシはそれではないためオーバーライドは呼ばれません。ネットワークシムを使ってください。" },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "プロキシが転送しない Unity メッセージを定義しています。これらは実行されません: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "IEnumerator を返していますが、サンドボックスにコルーチンはありません: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "OnEnable を定義しています。最初の 1 回は届かないので、一度だけの初期化は Start に置いてください。" }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "OnEnable を定義しています。最初の 1 回は届かないので、一度だけの初期化は Start に置いてください。" },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "ウェブページを開く" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "プレイヤーにブラウザーでページを開くよう求めます。アドレスは必ず表示され、開くかどうかはプレイヤーが決めます。プレイヤーがこのワールドやプロップを使った直後にだけ動作し、アバターからは使えません。コールバックで開いたかどうかがわかります。Application.OpenURL も同じ確認を通ります。" }
   ]
 }

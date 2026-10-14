@@ -271,6 +271,8 @@ namespace Basis.IK
             gizmos.Bone(stage, shoulderPos, elbowPos, color);
             gizmos.Bone(stage, elbowPos, handPos, color);
             gizmos.Point(stage, handPos, color);
+            gizmos.BoneAxes(stage, ref poseStream, root, gizmos.AxisLength);
+            gizmos.BoneAxes(stage, ref poseStream, mid, gizmos.AxisLength);
             gizmos.BoneAxes(stage, ref poseStream, tip, gizmos.AxisLength);
             gizmos.Line(stage, handPos, target, gizmoResidual);
 
@@ -299,6 +301,9 @@ namespace Basis.IK
                     text.Append(armSlot.SwivelDeg);
                     gizmos.Label(stage, elbowPos + playerUp * gizmos.PointSize * 4f, text, BasisIKGizmoPalette.Yellow);
                 }
+
+                gizmos.Point(stage, armSlot.HintPosition, BasisIKGizmoPalette.Yellow);
+                gizmos.Point(stage, armSlot.ConstrainedHintPosition, BasisIKGizmoPalette.Green);
             }
 
             if (isLeft)

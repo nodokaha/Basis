@@ -72,6 +72,16 @@
     { "key": "sdk.commonInspector.contentGroupId.generate.tooltip", "value": "Gib diesem Inhalt eine neue ID, damit künftige Uploads sich nicht mehr mit älteren stapeln." },
     { "key": "sdk.commonInspector.contentGroupId.copy", "value": "Kopieren" },
     { "key": "sdk.commonInspector.contentGroupId.copy.tooltip", "value": "Kopiert die ID in die Zwischenablage, z. B. um sie in einem anderen Projekt wiederzuverwenden." },
+    { "key": "sdk.commonInspector.authorship.foldout", "value": "Autor und Lizenz" },
+    { "key": "sdk.commonInspector.authorship.help", "value": "Optional. Wird in der .BEE-Datei gespeichert und Benutzern in den Details des Objekts genau so angezeigt, wie es hier steht. Leere Felder werden ausgeblendet, außer Autor: Dafür wird, falls vorhanden, dein lokaler DID-Schlüssel verwendet." },
+    { "key": "sdk.commonInspector.authorship.author", "value": "Autor" },
+    { "key": "sdk.commonInspector.authorship.author.tooltip", "value": "Wer diesen Inhalt erstellt hat. Mehrere Namen sind in Ordnung." },
+    { "key": "sdk.commonInspector.authorship.contact", "value": "Kontakt" },
+    { "key": "sdk.commonInspector.authorship.contact.tooltip", "value": "Wo man dich erreichen oder mehr von deinen Arbeiten finden kann, etwa eine Website oder ein Social-Media-Profil." },
+    { "key": "sdk.commonInspector.authorship.license", "value": "Lizenz" },
+    { "key": "sdk.commonInspector.authorship.license.tooltip", "value": "Die Bedingungen, unter denen dieser Inhalt geteilt wird, etwa „Alle Rechte vorbehalten“ oder „CC BY 4.0“." },
+    { "key": "sdk.commonInspector.authorship.credits", "value": "Credits" },
+    { "key": "sdk.commonInspector.authorship.credits.tooltip", "value": "Nennung von Arbeiten anderer, die dieser Inhalt verwendet, etwa Basismodelle, Texturen, Shader oder Sounds." },
     { "key": "sdk.commonInspector.buildOptions.foldout", "value": "AssetBundle-Build-Optionen" },
     { "key": "sdk.commonInspector.useCustomPassword", "value": "Benutzerdefiniertes Passwort verwenden" },
     { "key": "sdk.commonInspector.password", "value": "Passwort" },
@@ -473,7 +483,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "Bei jedem Build fragen" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "Immer IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "Immer Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Merkt sich die IL2CPP/Mono-Antwort für Windows- und macOS-Builds, damit du nicht jedes Mal gefragt wirst. Erzwungene Plattformen sind nicht betroffen: Android und iOS verwenden immer IL2CPP, Linux verwendet immer Mono. Die Wahl eines Backends in der Build-Abfrage aktualisiert ebenfalls diese Einstellung." },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "Immer CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Merkt sich die IL2CPP/Mono/CoreCLR-Antwort für Windows- und macOS-Builds, damit du nicht jedes Mal gefragt wirst. Erzwungene Plattformen sind nicht betroffen: Android und iOS verwenden immer IL2CPP, Linux verwendet immer CoreCLR (ARM64: IL2CPP). Die Wahl eines Backends in der Build-Abfrage aktualisiert ebenfalls diese Einstellung." },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "Plattform & Qualität" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +887,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "Die Klasse erbt von einem Netzwerk-Behaviour. Der ersetzende Proxy ist keines, die Overrides feuern also nie — hänge stattdessen den Netzwerk-Shim an." },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "Definiert Unity-Nachrichten, die der Proxy nie weiterleitet, sie laufen also nie: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "Gibt IEnumerator zurück, aber die Sandbox kennt keine Coroutinen: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Definiert OnEnable. Das erste entfällt, einmalige Einrichtung gehört daher in Start." }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Definiert OnEnable. Das erste entfällt, einmalige Einrichtung gehört daher in Start." },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "Eine Webseite öffnen" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "Bittet den Spieler, eine Seite in seinem Browser zu öffnen. Der Spieler sieht immer die Adresse und entscheidet selbst; es funktioniert nur direkt nachdem er diese Welt oder dieses Prop benutzt hat, nie von einem Avatar aus, und der Callback meldet, ob die Seite geöffnet wurde. Application.OpenURL läuft über dieselbe Frage." }
   ]
 }
