@@ -103,6 +103,9 @@ namespace Basis.BasisUI
             new Rule("UnityEngine.Audio.", null, "audio", false),
             new Rule("UnityEngine.AudioListener", null, "audio", false),
             new Rule("UnityEngine.AudioSettings", null, "audio", false),
+            new Rule("Basis.Shims.BasisSaveShim", null, "saves", false),
+            new Rule("Basis.Shims.BasisServerStorageShim", null, "serverSaves", false),
+            new Rule("Basis.Shims.BasisWebRequestShim", null, "webRequests", true),
             new Rule("Basis.", null, "basisInternals", false),
         };
 

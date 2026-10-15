@@ -9,7 +9,8 @@ namespace Basis.IK
         public const float HeadFadeStartSin = 0.15f, HeadFadeFullSin = 0.45f, RestOutward = 0.35f, RestBack = 0.25f;
         public const float MinReachFraction = 0.05f, MinReachDirectionFraction = 0.1f,ModelWeight = 0.85f, TeleportFraction = 0.6f;
         public const float WristKeepFrac = 0.15f, WristKeepMaxDeg = 15f, ForearmRollMaxDeg = 120f, WrapFadeStartDeg = 155f, WrapFadeEndDeg = 178f;
-        public const float HandTiltHintPush = 0.5f;
+        public const float HandTiltHintPush = 0.5f, BehindHintStart = 0.05f, BehindHintEnd = 0.6f, BehindHintInward = 0.8f;
+        public const float TrackerHintStraightStart = 0.02f, TrackerHintStraightEnd = 0.07f; // Tracked elbow offset from the shoulder/hand line (fraction of arm length) where its position stops/starts being trusted
         const float epsilon = 1e-5f, sqrEpsilon = 1e-8f;
         public static void Frame(Vector3 axis, Vector3 torsoUp, Vector3 torsoForward, Vector3 torsoOut, out Vector3 ex, out Vector3 ey)
         {
@@ -127,6 +128,11 @@ namespace Basis.IK
                 float forwardPush = Smoothstep(-chestToShoulder * 4.0f, 0, chestToHandForward) * inward * chain; // How far to push the elbow hint forward
                 worldHint += i.TorsoOut * outPush + i.TorsoForward * forwardPush;
 
+                // Reaching behind: gradually pull the elbow hint in toward the torso so the elbow tucks instead of flaring out.
+                float shoulderToHandForward = Vector3.Dot(handPos - i.Shoulder, i.TorsoForward) / chain; // Negative when the hand is behind the shoulder
+                float behind = Smoothstep(BehindHintStart, BehindHintEnd, -shoulderToHandForward);
+                worldHint -= i.TorsoOut * (behind * BehindHintInward * chain);
+
                 // Nudge the elbow hint up/down with hand roll. A flat palm is neutral, thumb tilted down raises the elbow, thumb tilted up lowers it.
                 Vector3 palmSide = Vector3.Cross(handFwd, palm) * (i.IsLeft ? 1f : -1f);
                 float handRoll = Vector3.Dot(palmSide, i.TorsoUp); // -1 thumb straight down, 0 palm flat, 1 thumb straight up
@@ -136,6 +142,18 @@ namespace Basis.IK
             // Project the hint onto the elbow circle to get the swivel angle.
             Vector3 hintDir = worldHint - center;
             hintDir -= axis * Vector3.Dot(hintDir, axis);
+            float side = i.IsLeft ? 1f : -1f;
+
+            // Near full extension a tracked elbow sits on the shoulder/hand line, so the direction of its offset is mostly noise and the arm twists around.
+            // Fade toward the bend direction implied by the elbow tracker's rotation, which stays meaningful even when the arm is perfectly straight.
+            if (i.HasTrackerHint && i.HasHintRotation && TrackerBendDir(i, axis, side, out Vector3 rotDir))
+            {
+                float hintOffset = hintDir.magnitude / chain; // How far the tracked elbow is off the shoulder/hand line
+                float straightBlend = 1f -Smoothstep(TrackerHintStraightStart, TrackerHintStraightEnd, hintOffset);
+                Vector3 posDir = hintDir.sqrMagnitude > sqrEpsilon ? hintDir.normalized : rotDir;
+                Vector3 mixed = posDir * (1f - straightBlend) + rotDir * straightBlend;
+                hintDir = mixed.sqrMagnitude > sqrEpsilon ? mixed : rotDir;
+            }
             float targetDeg = hintDir.sqrMagnitude > sqrEpsilon ? DirToDeg(hintDir.normalized, ex, ey) : BodyPrior(i, axis, ex, ey);
 
             // Smooth the swivel toward the target or teleport if needed
@@ -156,7 +174,6 @@ namespace Basis.IK
                 swivelDeg = Wrap(state.SwivelDeg + step);
             }
 
-            float side = i.IsLeft ? 1f : -1f;
             Vector3 finalDir = DegToDir(swivelDeg, ex, ey), finalElbow = center + finalDir * radius;
             Joints(i, finalElbow, finalDir, axis, side, palm, handFwd, out r.HumeralDeg, out r.PronationDeg, out r.WristFlexDeg, out r.WristDevDeg);
 
@@ -196,6 +213,29 @@ namespace Basis.IK
             float along = Vector3.Dot(handFwd, w);
             flexDeg = Mathf.Atan2(Vector3.Dot(handFwd, pN), along) * Mathf.Rad2Deg;
             devDeg = Mathf.Atan2(Vector3.Dot(handFwd, thumb), along) * Mathf.Rad2Deg;
+        }
+        // The elbow hinge axis in the rest pose; Pose maps this onto the solved hinge.
+        static Vector3 RestHinge(in BasisArmSolveInput i, Vector3 u0)
+        {
+            Vector3 h0 = Swing(i.TorsoOut, u0, i.TorsoUp);
+            h0 -= u0 * Vector3.Dot(h0, u0);
+            if (h0.sqrMagnitude < sqrEpsilon) h0 = i.TorsoUp;
+            return h0.normalized;
+        }
+        // Elbow direction (perpendicular to the shoulder/hand axis) implied by the elbow tracker's rotation.
+        // HintRotation is the tracker mapped onto the lower arm bone, so running Pose's rest hinge through it gives the live hinge, and Hinge() inverted gives the bend.
+        static bool TrackerBendDir(in BasisArmSolveInput i, Vector3 axis, float side, out Vector3 dir)
+        {
+            Vector3 hinge = i.HintRotation * (Quaternion.Inverse(i.RestMidRotation) * RestHinge(i, (i.RestElbow - i.Shoulder).normalized));
+            dir = Vector3.Cross(axis, hinge) * side;
+            dir -= axis * Vector3.Dot(dir, axis);
+            float dirSqr = dir.sqrMagnitude;
+            if (dirSqr < sqrEpsilon)
+            {
+                return false;
+            }
+            dir /= Mathf.Sqrt(dirSqr);
+            return true;
         }
         static float RestPrior(in BasisArmSolveInput i, Vector3 axis, Vector3 ex, Vector3 ey)
         {
@@ -242,10 +282,7 @@ namespace Basis.IK
         public static void Pose(in BasisArmSolveInput i, in BasisArmSolveResult r, Quaternion restUpperRot, Quaternion restLowerRot, out Quaternion upperRot, out Quaternion lowerRot, out float forearmRollDeg)
         {
             Vector3 u0 = (i.RestElbow - i.Shoulder).normalized, w0 = (i.RestHand - i.RestElbow).normalized, u = (r.Elbow - i.Shoulder).normalized, w = (r.Hand - r.Elbow).normalized;
-            Vector3 h0 = Swing(i.TorsoOut, u0, i.TorsoUp);
-            h0 -= u0 * Vector3.Dot(h0, u0);
-            if (h0.sqrMagnitude < sqrEpsilon) h0 = i.TorsoUp;
-            h0.Normalize();
+            Vector3 h0 = RestHinge(i, u0);
             upperRot = Align(restUpperRot, u0, u, h0, r.Hinge);
             lowerRot = Align(restLowerRot, w0, w, h0, r.Hinge);
             forearmRollDeg = ForearmRoll(i, r, lowerRot, restLowerRot);
@@ -282,7 +319,7 @@ namespace Basis.IK
     public static class BasisShoulderSolveCore
     {
         public const float ElevationStartDeg = 80f, ElevationEndDeg = 180f, ElevationMaxDeg = 75f, RetractionStartDeg = 70f, RetractionSlope = -0.22f, RetractionIntercept = 15.4f;
-        public const float RetractionShare = 0.5f, ForwardReachStart = 0.6f, ForwardReachFullDeg = 15f, CrossBodyDeg = 20f, BehindStart = 0.3f, BehindFullDeg = 12f, ShrugStartDeg = 150f, ShrugFullDeg = 10f;
+        public const float RetractionShare = 0.5f, ForwardReachStart = 0.35f, ForwardReachFullDeg = 20f, CrossBodyDeg = 20f, BehindStart = 0.05f, BehindEnd = 0.8f, BehindFullDeg = 35f, BehindTwistDeg = 20f, ShrugStartDeg = 150f, ShrugFullDeg = 10f;
         const float epsilon = 1e-5f, sqrEpsilon = 1e-8f;
         public static void Solve(in BasisShoulderSolveInput i, out BasisShoulderSolveResult r)
         {
@@ -294,16 +331,20 @@ namespace Basis.IK
                 return;
             }
 
+            float forward = Vector3.Dot(toHand, i.TorsoForward) / armLen, medial = -Vector3.Dot(toHand, i.TorsoOut) / armLen;
+            // Shoulder yaw follows the hand along the torso's forward axis: forward reach protracts, backward reach retracts
+            float prot = BasisArmSolveCore.Smoothstep(ForwardReachStart, 1f, forward) * ForwardReachFullDeg + Mathf.Clamp01(medial) * CrossBodyDeg;
+
             // Rotate shoulder up when arm is raised
             Vector3 dir = toHand / reach;
             float elevation = Vector3.Angle(-i.TorsoUp, dir), elev = ElevationMaxDeg * BasisArmSolveCore.Smoothstep(ElevationStartDeg, ElevationEndDeg, elevation);
-
-            float forward = Vector3.Dot(toHand, i.TorsoForward) / armLen, medial = -Vector3.Dot(toHand, i.TorsoOut) / armLen;
-            float prot = Mathf.Clamp01((forward - ForwardReachStart) / (1f - ForwardReachStart)) * ForwardReachFullDeg + Mathf.Clamp01(medial) * CrossBodyDeg;
-            prot -= Mathf.Clamp01((-forward - BehindStart) / 0.5f) * BehindFullDeg;
+            float behind = BasisArmSolveCore.Smoothstep(BehindStart, BehindEnd, -forward);
+            prot -= behind * BehindFullDeg;
             if (elevation > RetractionStartDeg) prot += (RetractionSlope * elevation + RetractionIntercept) * RetractionShare;
+
             elev = Mathf.Clamp(elev * i.ElevationFactor, -i.MaxDeg, i.MaxDeg);
             prot = Mathf.Clamp(prot * i.ProtractionFactor, -i.MaxDeg, i.MaxDeg);
+            float twist = Mathf.Clamp(behind * BehindTwistDeg, -i.MaxDeg, i.MaxDeg);
 
             Vector3 c0 = clavicle / clavLen, up = i.TorsoUp - c0 * Vector3.Dot(i.TorsoUp, c0), fwd = i.TorsoForward - c0 * Vector3.Dot(i.TorsoForward, c0);
             if (up.sqrMagnitude < sqrEpsilon || fwd.sqrMagnitude < sqrEpsilon)
@@ -317,6 +358,12 @@ namespace Basis.IK
             float e = elev * Mathf.Deg2Rad, p = prot * Mathf.Deg2Rad;
             Vector3 c1 = (c0 * Mathf.Cos(e) + up * Mathf.Sin(e)).normalized, c2 = (c1 * Mathf.Cos(p) + fwd * Mathf.Sin(p)).normalized;
             r.Delta = BasisQuaternionExt.FromToRotation(c0, c2);
+            // Backward reach only: roll the shoulder about its own clavicle axis so the top tips forward (upper arm position is unchanged)
+            if (Mathf.Abs(twist) > epsilon)
+            {
+                Vector3 rollAxis = Vector3.Dot(Vector3.Cross(up, fwd), c0) >= 0f ? c2 : -c2;
+                r.Delta = Quaternion.AngleAxis(twist, rollAxis) * r.Delta;
+            }
             r.ElevationDeg = elev;
             r.ProtractionDeg = prot;
             r.HumeralElevationDeg = elevation;

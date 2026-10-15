@@ -181,6 +181,7 @@
     <type fullname="Basis.Scripts.BasisSdk.BasisAvatarTransformStorage" preserve="nothing" serialized="true" />
     <type fullname="Basis.Scripts.BasisSdk.BasisProcessingAvatarOptions" preserve="nothing" serialized="true" />
     <type fullname="Basis.Scripts.BasisSdk.BasisVisemeDriveConfig" preserve="nothing" serialized="true" />
+    <type fullname="Basis.Scripts.BasisSdk.BasisVisemeProfile" preserve="nothing" serialized="true" />
     <type fullname="Basis.Scripts.Device_Management.BasisObservableList`1" preserve="nothing" serialized="true" />
     <type fullname="BasisBounds" preserve="nothing" serialized="true" />
     <type fullname="BasisBundleAuthorship" preserve="nothing" serialized="true" />

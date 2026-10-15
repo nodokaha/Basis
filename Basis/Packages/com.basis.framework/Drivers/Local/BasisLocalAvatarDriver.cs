@@ -95,10 +95,10 @@ namespace Basis.Scripts.Drivers
             BasisAvatarIKStageCalibration.BasisLimbRollStore.TrackerToBone.Clear();
 
             player.LocalRigDriver.CleanupBeforeContinue();
-            GameObject AvatarAnimatorParent = player.BasisAvatar.Animator.gameObject;
             ScaleAvatarModification.ReInitialize(player.BasisAvatar.Animator, player.AvatarTransform);
 
             player.BasisAvatar.Animator.updateMode = AnimatorUpdateMode.Normal;
+            player.BasisAvatar.Animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             player.BasisAvatar.Animator.logWarnings = false;
 
             if (player.BasisAvatar.Animator.runtimeAnimatorController == null)
@@ -205,10 +205,6 @@ namespace Basis.Scripts.Drivers
             player.LocalHandDriver.ReInitialize(player.BasisAvatar.Animator);
             player.LocalAnimatorDriver.Initialize(player);
 
-
-            // Exit T-Pose and restore animator
-            ResetAvatarAnimator();
-
             if (player.LocalBoneDriver.FindBone(out BasisLocalBoneControl Head, BasisBoneTrackedRole.Head))
             {
                 Head.HasRigLayer = BasisHasRigLayer.HasRigLayer;
@@ -227,6 +223,11 @@ namespace Basis.Scripts.Drivers
             // Root is now normalized to identity; offsets captured above were taken before this.
             RecordCalibrationStage("PostZero", player);
             player.LocalRigDriver.BuildBuilder();
+
+            // Exit T-Pose and restore animator. Must come after BuildBuilder: swapping the controller back
+            // resets the bones to the prefab's default pose (often an A-pose), and BuildBuilder captures the
+            // IK rest skeleton that calibration uses as the fitted T-pose reference.
+            ResetAvatarAnimator();
 
             IsNormalHead = true;
             RemoveJiggleRigColliders();
@@ -456,7 +457,7 @@ namespace Basis.Scripts.Drivers
             TposeStateChange?.Invoke();
 
             BasisLocalPlayer.Instance.LocalRigDriver.DisableAllTrackers();
-            //anytime a avatar goes into a tpose we can grab the avatar height information
+            //anytime a, avatar goes into a t-pose we can grab the avatar height information
             BasisHeightDriver.CaptureAvatarHeightDuringTpose();
         }
 
